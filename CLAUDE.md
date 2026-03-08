@@ -8,7 +8,7 @@
 - **Simplicity first** — minimal impact changes, only touch what's necessary
 - **No temporary fixes** — find root causes, senior developer standards
 - **All timestamps are Central Time** (US/Central)
-- When completing work, always update `tasks/todo.md`, `tasks/lessons.md`, and `README.md`
+- At the end of every session, update `tasks/todo.md`, `tasks/lessons.md`, and `README.md` with current status before committing
 
 ## Tech Stack
 

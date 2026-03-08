@@ -4,7 +4,7 @@ Automate, standardize, and enforce accountability for asset/receivable meetings 
 
 ## Roadmap
 
-### Phase 1: Packet Generator + Flagging
+### Phase 1: Packet Generator + Flagging *(In Progress)*
 Parse R&R DMS exports (PDF schedules, GL reports) into structured data. Apply configurable flagging rules to surface issues. Generate standardized meeting packets and flagged-item reports.
 
 ### Phase 2: Accountability Web App
@@ -20,16 +20,125 @@ Automated DMS export ingestion, trend analysis, cross-store benchmarking, and ex
 - **APIs**: Google Calendar API, SendGrid/Postmark
 - **Data Sources**: R&R DMS PDF exports
 
+## Data Models
+
+16 models across 7 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
+
+### Core
+| Model | Table | Description |
+|-------|-------|-------------|
+| Store | `stores` | Dealership locations with GM info and meeting cadence |
+| Meeting | `meetings` | Per-store meeting instances with status tracking |
+
+### Inventory (`inventory.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| NewVehicleInventory | `new_vehicle_inventory` | New vehicle stock with floorplan and book values |
+| UsedVehicleInventory | `used_vehicle_inventory` | Used vehicle stock with market value and acquisition source |
+| ServiceLoaner | `service_loaners` | Loaner vehicles with negative equity tracking |
+| FloorplanReconciliation | `floorplan_reconciliations` | Book vs floorplan variance (Schedule 237/240) |
+
+### Parts (`parts.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| PartsInventory | `parts_inventory` | GL 242/243/244 parts balances |
+| PartsAnalysis | `parts_analysis` | Monthly turnover, obsolescence, stock order metrics |
+
+### Financial (`financial.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| Receivable | `receivables` | Aged receivables (200/220/2612) with 30/60/90 buckets |
+| FIChargeback | `fi_chargebacks` | F&I reserve chargebacks (850/851 accounts) |
+| ContractInTransit | `contracts_in_transit` | Unfunded deals with days-in-transit tracking |
+| Prepaid | `prepaids` | Prepaid expenses (GL 2741) |
+| PolicyAdjustment | `policy_adjustments` | Policy/goodwill adjustments (GL 15A/15B) |
+
+### Operations (`operations.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| OpenRepairOrder | `open_repair_orders` | Open ROs with service type and aging |
+| WarrantyClaim | `warranty_claims` | Warranty claims with status tracking |
+| MissingTitle | `missing_titles` | Vehicles missing titles with days-missing count |
+| SlowToAccounting | `slow_to_accounting` | Deals slow to reach accounting |
+
+### Flags (`flag.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| Flag | `flags` | Flagged items with severity, category, and response tracking |
+
+### Enums
+- `MeetingStatus`: pending, processing, completed, error
+- `ReconciliationType`: new_237, used_240
+- `PartsCategory`: parts_242, tires_243, gas_oil_grease_244
+- `ReceivableType`: parts_service_200, wholesale_220, factory_2612
+- `FlagCategory`: inventory, parts, financial, operations
+- `FlagSeverity`: yellow, red
+- `FlagStatus`: open, responded, escalated
+
+## Parser Architecture
+
+The parser framework processes R&R DMS PDF exports through a three-layer pipeline:
+
+```
+PDF Upload → PDFExtractor → ParserRouter → [InventoryParser, PartsParser, FinancialParser, OperationsParser] → ProcessingService → Database
+```
+
+**PDFExtractor** (`parsers/pdf_extractor.py`) — Uses pdfplumber to extract text, lines, and tables from each PDF page into a standardized page dict format.
+
+**ParserRouter** (`parsers/router.py`) — Routes pages to parsers based on section identifiers. Each page is matched to parser(s) that recognize its content. Unhandled pages are tracked for logging.
+
+**BaseParser** (`parsers/base.py`) — Abstract base with shared utilities: `clean_currency()`, `clean_int()`, `parse_date()`, `extract_table_rows()`, `find_section_in_pages()`. All parsers inherit from this.
+
+**InventoryParser** (`parsers/inventory_parser.py`) — Handles schedules 237 (new vehicles), 240 (used vehicles), 277 (service loaners). Tries pdfplumber table extraction first, falls back to line-by-line regex parsing. Computes FloorplanReconciliation records with book vs floorplan variance.
+
+**PartsParser** (`parsers/parts_parser.py`) — Handles GL 242 (parts), 243 (tires), 244 (gas/oil/grease) inventory summaries and parts monthly analysis (turnover, stock order performance, obsolescence).
+
+**FinancialParser** (`parsers/financial_parser.py`) — Handles receivables aging (schedules 200, 220, GL 2612), F&I chargebacks (accounts 850/851 with context-aware matching), contracts in transit (schedule 205), prepaids (GL 2741), and policy adjustments (GL 15A/15B).
+
+**OperationsParser** (`parsers/operations_parser.py`) — Handles open repair orders (with CP/warranty/internal service types), warranty claims (schedule 263), missing titles, and slow-to-accounting deals.
+
+**ProcessingService** (`services/processing_service.py`) — Orchestrates the full pipeline: extract → parse → save → flag. Maps parser output dicts to SQLAlchemy model instances. After saving records, runs the FlaggingEngine to generate Flag records. Returns flag summary (yellow/red/total counts) alongside parsed record counts.
+
+## Flagging Engine
+
+The flagging engine (`app/flagging/`) evaluates parsed meeting data against configurable rules to generate yellow (warning) and red (escalate) flags.
+
+**FlagRule** (`flagging/rules.py`) — Dataclass defining a rule: category, model, field, thresholds, comparison type, and message template. 15 default rules stored in `DEFAULT_RULES`.
+
+**FlaggingEngine** (`flagging/engine.py`) — Queries parsed records per meeting, evaluates each against enabled rules, and produces `Flag` model instances. Red threshold is checked first to avoid double-flagging.
+
+### Rules (15 total)
+
+| # | Rule | Model | Field | Yellow | Red | Comparison |
+|---|------|-------|-------|--------|-----|------------|
+| 1 | Used Vehicle Age | UsedVehicleInventory | days_in_stock | >60 | >90 | gt |
+| 2 | New Vehicle Age | NewVehicleInventory | days_in_stock | >90 | >120 | gt |
+| 3 | Service Loaner Days | ServiceLoaner | days_in_service | >60 | >90 | gt |
+| 4 | Service Loaner Neg Equity | ServiceLoaner | negative_equity | >$30K | >$50K | gt |
+| 5 | Floorplan Variance | FloorplanReconciliation | variance | abs>$100 | abs>$1K | abs_gt |
+| 6 | Receivable Over 30 | Receivable | over_30 | >$0 | — | any_gt |
+| 7 | Receivable Over 60 | Receivable | over_60 | — | >$0 | any_gt |
+| 8 | F&I Chargeback Current | FIChargeback | current_balance | >$0 | — | any_gt |
+| 9 | F&I Chargeback Over 90 | FIChargeback | over_90_balance | — | >$0 | any_gt |
+| 10 | Contract In Transit Age | ContractInTransit | days_in_transit | >7 | >14 | gt |
+| 11 | Missing Title | MissingTitle | days_missing | >=0 | >=14 | gte |
+| 12 | Open RO Age | OpenRepairOrder | days_open | >14 | >30 | gt |
+| 13 | Slow To Accounting | SlowToAccounting | days_to_accounting | >5 | >10 | gt |
+| 14 | Parts True Turnover | PartsAnalysis | true_turnover | <2.0 | <1.0 | lt |
+| 15 | Parts Obsolete Value | PartsAnalysis | obsolete_value | >$500 | >$2K | gt |
+
+Comparison types: `gt` (greater than), `lt` (less than — lower is worse), `gte` (greater or equal), `any_gt` (any amount > 0), `abs_gt` (absolute value exceeds threshold).
+
 ## Phase 1 Deliverables
 
-- PostgreSQL data models for all report categories
-- PDF parser framework with category-specific parsers (inventory, parts, financial, operations)
-- Configurable flagging engine with initial rule set
-- Standardized PDF packet generator
-- Flagged items report generator
-- Upload API endpoints
-- Simple upload web UI
-- Floorplan reconciliation (Schedule 237 vs 231/310 variance)
+- [x] PostgreSQL data models for all report categories
+- [x] PDF parser framework with category-specific parsers (inventory, parts, financial, operations)
+- [x] Configurable flagging engine with initial rule set
+- [ ] Standardized PDF packet generator
+- [ ] Flagged items report generator
+- [ ] Upload API endpoints
+- [ ] Simple upload web UI
+- [ ] Floorplan reconciliation (Schedule 237 vs 231/310 variance)
 
 ## Setup
 
@@ -46,4 +155,4 @@ cd backend && alembic upgrade head
 
 ## Current Status
 
-**Phase 1** — Repository initialization complete. Parser and flagging engine development next.
+**Phase 1 in progress** — Data pipeline complete (parse + flag). 16 models, 4 parsers, 15 flagging rules, 152 tests passing. Output generators and API next.
