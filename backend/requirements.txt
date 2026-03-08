@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+alembic
+psycopg2-binary
+pydantic
+pydantic-settings
+python-multipart
+pdfplumber
+reportlab
+python-dateutil
+httpx
+pytest
+asyncpg
