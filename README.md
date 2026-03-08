@@ -97,7 +97,33 @@ PDF Upload → PDFExtractor → ParserRouter → [InventoryParser, PartsParser, 
 
 **OperationsParser** (`parsers/operations_parser.py`) — Handles open repair orders (with CP/warranty/internal service types), warranty claims (schedule 263), missing titles, and slow-to-accounting deals.
 
-**ProcessingService** (`services/processing_service.py`) — Orchestrates the full pipeline: extract → parse → save → flag. Maps parser output dicts to SQLAlchemy model instances. After saving records, runs the FlaggingEngine to generate Flag records. Returns flag summary (yellow/red/total counts) alongside parsed record counts.
+**ProcessingService** (`services/processing_service.py`) — Orchestrates the full pipeline: extract → parse → save → flag → generate PDFs. Maps parser output dicts to SQLAlchemy model instances. After saving records, runs the FlaggingEngine to generate Flag records. Then generates both output PDFs and updates the Meeting record with file paths and completed status.
+
+## Output Documents
+
+The system generates two PDF documents per meeting:
+
+### Standardized Packet (`generators/packet_generator.py`)
+A clean, consistent PDF replacing manually-assembled packets. Every store's packet looks the same regardless of who prepared it. Structure:
+- **Cover Page** — GOAC branding, store name, meeting date, flag summary
+- **Section 1: Executive Summary** — Quick stats (vehicle counts, floorplan exposure, aging, negative equity, turnover, receivables), red flag alert, floorplan reconciliation
+- **Section 2: New Vehicle Inventory** — Sorted by days oldest-first, color-coded (red >120 days, yellow >90), subtotals, floorplan reconciliation box
+- **Section 3: Used Vehicle Inventory** — Sorted by days oldest-first, color-coded (red >90, yellow >60), over-60/90 counts
+- **Section 4: Service Loaners** — Color-coded by days and negative equity thresholds, total negative equity prominently displayed
+- **Section 5: Parts** — Inventory summary (GL 242/243/244) and monthly analysis with turnover color-coding (red <1.0, yellow <2.0)
+- **Section 6: Receivables** — Aging table per type with color-coded non-zero aging buckets
+- **Section 7: F&I Chargebacks** — Over-90 balances highlighted in red
+- **Section 8: Contracts in Transit** — Color-coded by days (red >14, yellow >7)
+- **Section 9: Operations** — Open ROs, missing titles, slow-to-accounting deals
+
+Footer on every page: page number, store/date identifier, generation timestamp (CT), CONFIDENTIAL marker.
+
+### Flagged Items Report (`generators/flagged_items_report.py`)
+A separate PDF listing ONLY items requiring a response. This is what managers must answer within 24 hours (Phase 2 accountability). Structure:
+- **Header** — "FLAGGED ITEMS — ACTION REQUIRED", store name, meeting date, 24-hour deadline
+- **Red Flags Section** — Escalated items with category label, flag message, value/threshold, blank response line and manager/date fields
+- **Yellow Flags Section** — Warning items in same format
+- **Summary Footer** — Total red/yellow counts, submission deadline, auto-escalation notice
 
 ## Flagging Engine
 
@@ -129,14 +155,52 @@ The flagging engine (`app/flagging/`) evaluates parsed meeting data against conf
 
 Comparison types: `gt` (greater than), `lt` (less than — lower is worse), `gte` (greater or equal), `any_gt` (any amount > 0), `abs_gt` (absolute value exceeds threshold).
 
+## API Endpoints
+
+All routes are prefixed with `/api/v1`. Health check is at root `/health`.
+
+### Upload
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/upload` | Upload a single R&R report PDF for processing |
+| POST | `/api/v1/upload/bulk` | Upload multiple PDFs for the same meeting |
+
+### Packets
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/packets/{meeting_id}` | Download the generated packet PDF |
+| GET | `/api/v1/packets/{meeting_id}/flagged-items` | Download the flagged items report PDF |
+| GET | `/api/v1/packets/{meeting_id}/summary` | Get JSON summary of meeting data and flags |
+
+### Flags
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/flags/{meeting_id}` | Get flags with optional severity/category/status filters |
+| GET | `/api/v1/flags/{meeting_id}/stats` | Get flag statistics (counts by severity, status, category) |
+| PATCH | `/api/v1/flags/{flag_id}/respond` | Submit a response to a flagged item |
+
+### Stores
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/stores` | List all active stores |
+| GET | `/api/v1/stores/{store_id}` | Get store details with recent meetings |
+| POST | `/api/v1/stores` | Create a new store |
+| GET | `/api/v1/stores/{store_id}/meetings` | Get recent meetings for a store |
+
+### Meetings
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/meetings/{meeting_id}` | Get meeting details |
+| GET | `/api/v1/meetings/{meeting_id}/data/{category}` | Get parsed data by category (inventory/parts/financial/operations) |
+
 ## Phase 1 Deliverables
 
 - [x] PostgreSQL data models for all report categories
 - [x] PDF parser framework with category-specific parsers (inventory, parts, financial, operations)
 - [x] Configurable flagging engine with initial rule set
-- [ ] Standardized PDF packet generator
-- [ ] Flagged items report generator
-- [ ] Upload API endpoints
+- [x] Standardized PDF packet generator (9 sections, color-coded tables, footers)
+- [x] Flagged items report generator (red/yellow sections, response lines, 24-hour deadline)
+- [x] Upload API endpoints (18 endpoints, 5 route modules, Pydantic schemas)
 - [ ] Simple upload web UI
 - [ ] Floorplan reconciliation (Schedule 237 vs 231/310 variance)
 
@@ -155,4 +219,4 @@ cd backend && alembic upgrade head
 
 ## Current Status
 
-**Phase 1 in progress** — Data pipeline complete (parse + flag). 16 models, 4 parsers, 15 flagging rules, 152 tests passing. Output generators and API next.
+**Phase 1 in progress** — Full data pipeline with REST API. 16 models, 4 parsers, 15 flagging rules, 2 PDF generators, 18 API endpoints, 242 tests passing. Web UI next.

@@ -10,9 +10,9 @@
 - [x] Build operations parser (open ROs, warranty claims, missing titles, employee roster)
 - [x] Implement flagging engine with configurable rules
 - [x] Implement all initial flagging rules per the rules table
-- [ ] Build standardized PDF packet generator
-- [ ] Build flagged items report generator
-- [ ] Build upload API endpoints
+- [x] Build standardized PDF packet generator
+- [x] Build flagged items report generator
+- [x] Build upload API endpoints
 - [ ] Build simple upload web UI
 - [ ] Test against Ashdown reference packet
 - [ ] Validate floorplan reconciliation output (237 vs 231/310 variance)
@@ -25,3 +25,17 @@
 - Built flagging engine with 15 business rules
 - 152 tests all passing
 - Pipeline complete through: Upload → Extract → Parse → Save → Flag
+
+### Session 2 — 2026-03-08
+- Built StandardizedPacketGenerator (9-section PDF: cover, exec summary, new/used vehicles, loaners, parts, receivables, F&I, contracts, operations)
+- Built FlaggedItemsReportGenerator (red flags → yellow flags, response lines, summary footer)
+- Integrated both generators into ProcessingService (auto-generates after flagging, updates meeting record)
+- 187 tests all passing (35 new generator tests)
+- Pipeline complete through: Upload → Extract → Parse → Save → Flag → Generate PDFs
+
+### Session 3 — 2026-03-08
+- Built all API endpoints: upload (single + bulk), packets (PDF + summary), flags (CRUD + stats), stores (CRUD + meetings), meetings (detail + category data)
+- 18 endpoints across 5 route modules, all under /api/v1 prefix
+- Pydantic response schemas for all endpoints (auto-validation + OpenAPI docs)
+- 55 new API tests (in-memory SQLite + httpx AsyncClient), 242 total all passing
+- Full pipeline now accessible via REST API

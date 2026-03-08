@@ -1,11 +1,17 @@
-"""Processing service — orchestrates PDF extraction, parsing, database insertion, and flagging."""
+"""Processing service — orchestrates PDF extraction, parsing, database insertion, flagging, and PDF generation."""
 
 import logging
+import os
 import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.flag import FlagSeverity
+from app.models.meeting import Meeting, MeetingStatus
 from app.models.inventory import (
     FloorplanReconciliation,
     NewVehicleInventory,
@@ -33,6 +39,8 @@ from app.models.operations import (
     WarrantyClaim,
 )
 from app.flagging.engine import FlaggingEngine
+from app.generators.packet_generator import StandardizedPacketGenerator
+from app.generators.flagged_items_report import FlaggedItemsReportGenerator
 from app.parsers.pdf_extractor import PDFExtractor
 from app.parsers.router import ParserRouter
 
@@ -133,6 +141,49 @@ class ProcessingService:
         for flag in flags:
             db.add(flag)
 
+        await db.flush()
+
+        # Generate packet PDF
+        packet_path = None
+        flagged_items_path = None
+        try:
+            packet_gen = StandardizedPacketGenerator()
+            packet_bytes = await packet_gen.generate(str(meeting_uuid), db)
+            packet_dir = os.path.join(settings.UPLOAD_DIR, str(store_uuid), str(meeting_uuid))
+            os.makedirs(packet_dir, exist_ok=True)
+            packet_path = os.path.join(packet_dir, "packet.pdf")
+            with open(packet_path, "wb") as f:
+                f.write(packet_bytes)
+            logger.info(f"Generated packet PDF: {packet_path}")
+        except Exception:
+            logger.exception("Failed to generate packet PDF")
+
+        # Generate flagged items report
+        try:
+            flags_gen = FlaggedItemsReportGenerator()
+            flags_bytes = await flags_gen.generate(str(meeting_uuid), db)
+            flags_dir = os.path.join(settings.UPLOAD_DIR, str(store_uuid), str(meeting_uuid))
+            os.makedirs(flags_dir, exist_ok=True)
+            flagged_items_path = os.path.join(flags_dir, "flagged_items.pdf")
+            with open(flagged_items_path, "wb") as f:
+                f.write(flags_bytes)
+            logger.info(f"Generated flagged items PDF: {flagged_items_path}")
+        except Exception:
+            logger.exception("Failed to generate flagged items PDF")
+
+        # Update meeting record
+        meeting_result = await db.execute(
+            select(Meeting).where(Meeting.id == meeting_uuid)
+        )
+        meeting = meeting_result.scalar_one_or_none()
+        if meeting:
+            if packet_path:
+                meeting.packet_url = packet_path
+            if flagged_items_path:
+                meeting.flagged_items_url = flagged_items_path
+            meeting.packet_generated_at = datetime.now(ZoneInfo("US/Central"))
+            meeting.status = MeetingStatus.COMPLETED
+
         await db.commit()
 
         return {
@@ -144,6 +195,8 @@ class ProcessingService:
                 "red": sum(1 for f in flags if f.severity == FlagSeverity.RED),
                 "total": len(flags),
             },
+            "packet_path": packet_path,
+            "flagged_items_path": flagged_items_path,
         }
 
     async def process_upload_from_bytes(
@@ -192,6 +245,47 @@ class ProcessingService:
         for flag in flags:
             db.add(flag)
 
+        await db.flush()
+
+        # Generate packet PDF
+        packet_path = None
+        flagged_items_path = None
+        try:
+            packet_gen = StandardizedPacketGenerator()
+            packet_bytes = await packet_gen.generate(str(meeting_uuid), db)
+            packet_dir = os.path.join(settings.UPLOAD_DIR, str(store_uuid), str(meeting_uuid))
+            os.makedirs(packet_dir, exist_ok=True)
+            packet_path = os.path.join(packet_dir, "packet.pdf")
+            with open(packet_path, "wb") as f:
+                f.write(packet_bytes)
+        except Exception:
+            logger.exception("Failed to generate packet PDF")
+
+        # Generate flagged items report
+        try:
+            flags_gen = FlaggedItemsReportGenerator()
+            flags_bytes = await flags_gen.generate(str(meeting_uuid), db)
+            flags_dir = os.path.join(settings.UPLOAD_DIR, str(store_uuid), str(meeting_uuid))
+            os.makedirs(flags_dir, exist_ok=True)
+            flagged_items_path = os.path.join(flags_dir, "flagged_items.pdf")
+            with open(flagged_items_path, "wb") as f:
+                f.write(flags_bytes)
+        except Exception:
+            logger.exception("Failed to generate flagged items PDF")
+
+        # Update meeting record
+        meeting_result = await db.execute(
+            select(Meeting).where(Meeting.id == meeting_uuid)
+        )
+        meeting = meeting_result.scalar_one_or_none()
+        if meeting:
+            if packet_path:
+                meeting.packet_url = packet_path
+            if flagged_items_path:
+                meeting.flagged_items_url = flagged_items_path
+            meeting.packet_generated_at = datetime.now(ZoneInfo("US/Central"))
+            meeting.status = MeetingStatus.COMPLETED
+
         await db.commit()
 
         return {
@@ -203,4 +297,6 @@ class ProcessingService:
                 "red": sum(1 for f in flags if f.severity == FlagSeverity.RED),
                 "total": len(flags),
             },
+            "packet_path": packet_path,
+            "flagged_items_path": flagged_items_path,
         }
