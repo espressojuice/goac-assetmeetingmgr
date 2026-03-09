@@ -14,8 +14,10 @@
 - [x] Build flagged items report generator
 - [x] Build upload API endpoints
 - [x] Build simple upload web UI
-- [ ] Test against Ashdown reference packet
-- [ ] Validate floorplan reconciliation output (237 vs 231/310 variance)
+- [x] Test against Ashdown reference packet
+- [x] Validate floorplan reconciliation output (237 vs 231/310 variance)
+- [x] PDF generation smoke test (packet + flagged items report)
+- [x] Flagging engine validation against parsed Ashdown data (54 flags: 34 red, 20 yellow)
 
 ## Session Log
 
@@ -46,3 +48,30 @@
 - Flags preview table with severity/category filters, recent meetings sidebar with download links
 - Responsive layout (tablet-friendly), GOAC blue (#003366) branding, color-coded flags
 - 242 tests still passing — Phase 1 feature-complete
+
+### Session 5 — 2026-03-09 (Ashdown Integration Testing)
+- Added OCR support via EasyOCR + pypdfium2 (pure Python, no system dependencies)
+- PDFExtractor now renders scanned pages to images, OCRs them, reconstructs text lines + tables
+- Landscape page detection + 90° rotation retry (page 27 missing titles)
+- All 4 parsers updated with OCR-specific parsing methods for Schedule Summary format
+- InventoryParser: continuation page detection via column headers (237/240/277)
+- FinancialParser: GL INQUIRY format parsing (850/851 chargebacks), OCR-tolerant closing balance
+- OperationsParser: OCR date parsing for slow-to-accounting (DD/YY format), warranty claim extraction
+- PartsParser: two-pass OCR analysis (raw + cleaned), cost_of_sales decimal-point targeting
+- 49 integration tests against Ashdown reference packet — all passing
+- 242 existing unit tests — all passing (291 total)
+- Key results: 52 new vehicles, 48 used, 3 loaners, 4 CIT, 4 chargebacks, 2 receivables,
+  2 policy adj, 41 ROs, 12 warranty claims, 3 missing titles, 2 slow-acct, 3 parts analysis
+
+### Session 6 — 2026-03-09 (Phase 1 Cleanup)
+- Fixed all 4 extraction gaps against Ashdown reference packet:
+  - Used vehicles: 48 → 60 (case-insensitive OCR pattern, lowercase 'v' suffix, '+' artifacts)
+  - Service loaners: 3 → 4 (allow '+' in VIN/control# patterns)
+  - Open ROs: 41 → 58 (removed 'CWI' from header filter, tolerant RO# regex)
+  - Warranty claims: 12 → 16 (tolerant claim number regex for OCR artifacts)
+- Fixed cost_of_sales extraction (20593 → 29941.28) — made TOTAL prefix mandatory
+- Built flagging validation test (15 tests): 54 flags generated (34 red, 20 yellow)
+- Generated output PDFs: packet (28KB) and flagged items report (12KB)
+- Tightened all integration test assertions to exact counts
+- 308 tests passing (242 unit + 66 integration)
+- Phase 1 COMPLETE

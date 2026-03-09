@@ -17,6 +17,46 @@ _GL_CATEGORY_MAP = {
     "244": "gas_oil_grease_244",
 }
 
+# Regex to collapse OCR-introduced spaces inside numbers.
+# Matches digits separated by spaces around a dot, e.g. "64 . 2 8" -> "64.28"
+# Also handles "29 , 941 . 28" -> "29,941.28" and plain "1 2 3" -> "123"
+_OCR_SPACED_NUMBER = re.compile(r"(?<=\d)\s+(?=[.,])|(?<=[.,])\s+(?=\d)|(?<=\d)\s+(?=\d)")
+
+
+def _clean_ocr_number(text: str) -> str:
+    """Remove OCR-induced spaces inside a number string.
+
+    Examples:
+        "64 . 2 8"   -> "64.28"
+        "29 , 941.28" -> "29,941.28"
+        "110 720 . 14" -> "110720.14"
+        "4 . 3"       -> "4.3"
+    """
+    return _OCR_SPACED_NUMBER.sub("", text)
+
+
+def _clean_ocr_line(line: str) -> str:
+    """Aggressively clean an OCR line by collapsing spaced-out numbers.
+
+    Scans the line for number-like token sequences and collapses them while
+    leaving other text untouched.
+    """
+    # Find runs that look like spaced numbers: digits/dots/commas separated by spaces
+    # e.g. "29 , 941 . 28" or "110 720 . 14"
+    pattern = re.compile(
+        r"""
+        \$?\s*                         # optional dollar sign
+        (?:\d[\d\s]*[\s]*[.,][\s]*)*   # groups of digits + separator
+        \d[\d\s]*\d                    # at least two digits with possible spaces
+        """,
+        re.VERBOSE,
+    )
+
+    def _collapse(m: re.Match) -> str:
+        return _clean_ocr_number(m.group(0))
+
+    return pattern.sub(_collapse, line)
+
 
 class PartsParser(BaseParser):
     """Parser for parts inventory (GL 242-244) and parts monthly analysis."""
@@ -34,6 +74,7 @@ class PartsParser(BaseParser):
         "PARTS MONTHLY",
         "PARTS ANALYSIS",
         "PARTS ACTIVITY",
+        "MONTHLY ANALYSIS",
         "TURNOVER",
         "STOCK ORDER",
     ]
@@ -44,7 +85,7 @@ class PartsParser(BaseParser):
     ]
     _ANALYSIS_IDENTIFIERS = [
         "PARTS MONTHLY", "PARTS ANALYSIS", "PARTS ACTIVITY",
-        "TURNOVER", "STOCK ORDER",
+        "MONTHLY ANALYSIS", "TURNOVER", "STOCK ORDER",
     ]
 
     def parse(self, pages: list[dict]) -> dict:
@@ -166,17 +207,19 @@ class PartsParser(BaseParser):
     def _parse_analysis_page(self, page: dict) -> dict | None:
         """Parse parts monthly analysis data."""
         record: dict = {}
+        is_ocr = page.get("ocr_used", False)
 
-        # Try table extraction first
-        if page.get("tables"):
+        # Try table extraction first — but skip for OCR pages since tables
+        # are unreliable from OCR output.
+        if not is_ocr and page.get("tables"):
             for table in page["tables"]:
                 rows = self.extract_table_rows(table)
                 for row in rows:
                     self._extract_analysis_fields(row, record)
 
-        # Fall back to line parsing
-        if not record:
-            self._extract_analysis_from_lines(page["lines"], record)
+        # Fall back to (or always use for OCR) line parsing
+        if not record or is_ocr:
+            self._extract_analysis_from_lines(page["lines"], record, is_ocr=is_ocr)
 
         if not record:
             return None
@@ -221,34 +264,129 @@ class PartsParser(BaseParser):
                         record[target_field] = val
                         break
 
-    def _extract_analysis_from_lines(self, lines: list[str], record: dict) -> None:
-        """Extract analysis fields from text lines using pattern matching."""
+    def _extract_analysis_from_lines(
+        self, lines: list[str], record: dict, *, is_ocr: bool = False
+    ) -> None:
+        """Extract analysis fields from text lines using pattern matching.
+
+        For OCR text, numbers may have embedded spaces (e.g. "64 . 2 8").
+        We pre-clean each line to collapse those before applying patterns.
+        We also do a two-pass approach: first try the current line, then try
+        combining the label line with the next line (value on separate line).
+        """
+        # Build pattern list — order matters (first match wins per field).
+        # Patterns are applied to OCR-cleaned lines.
         line_patterns = [
-            ("cost_of_sales", re.compile(r"COST\s+OF\s+SALES.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
-            ("average_investment", re.compile(r"AVE?RAGE?\s+INV.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
-            ("true_turnover", re.compile(r"TRUE\s+TURN.*?([\d,.]+)\s*$", re.IGNORECASE)),
-            ("months_no_sale", re.compile(r"MONTHS?\s+NO\s+SALE.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
-            ("obsolete_value", re.compile(r"OBSOLETE?.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
-            ("stock_order_performance", re.compile(r"STOCK\s+ORDER.*?([\d,.]+)\s*%?\s*$", re.IGNORECASE)),
-            ("outstanding_orders_value", re.compile(r"OUTSTANDING.*?ORDER.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
-            ("processed_orders_value", re.compile(r"PROCESSED.*?ORDER.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
-            ("receipts_value", re.compile(r"RECEIPTS?\s+.*?([\d,.$()-]+)\s*$", re.IGNORECASE)),
+            ("cost_of_sales", re.compile(
+                r"TOTAL\s+COST\s+(?:OF\s+)?SALES.*?([\d,]+\.\d{2})", re.IGNORECASE
+            )),
+            ("cost_of_sales", re.compile(
+                r"TOTAL\s+COST\s+(?:OF\s+)?SALES.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("cost_of_sales", re.compile(
+                r"COST\s+(?:OF\s+)?SALES\s+[\$]?\s*([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("average_investment", re.compile(
+                r"(?:TOTAL\s+)?INVESTMENT.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("average_investment", re.compile(
+                r"AVE?RAGE?\s+INV.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("true_turnover", re.compile(
+                r"TRUE\s+TURN(?:OVER)?(?:\s+RATE)?.*?([\d,.]+)\s*[%$]?\s*$", re.IGNORECASE
+            )),
+            ("months_no_sale", re.compile(
+                r"MONTHS?\s+NO\s+SALE.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("obsolete_value", re.compile(
+                r"OBSOLETE?.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("obsolete_value", re.compile(
+                r"\bOB\b.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("stock_order_performance", re.compile(
+                r"STOCK\s+ORDER(?:\s+PERF(?:ORMANCE)?)?\s*.*?([\d,.]+)\s*[%$]?\s*$",
+                re.IGNORECASE,
+            )),
+            ("outstanding_orders_value", re.compile(
+                r"OUTSTANDING.*?ORDER.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("processed_orders_value", re.compile(
+                r"PROCESSED.*?ORDER.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("receipts_value", re.compile(
+                r"RECEIPTS?\s+.*?([\d,.$()-]+)\s*$", re.IGNORECASE
+            )),
+            ("level_of_service", re.compile(
+                r"LEVEL\s+OF\s+SERVICE.*?([\d,.]+)\s*[%$]?\s*$", re.IGNORECASE
+            )),
+            ("gross_turnover", re.compile(
+                r"GROSS\s+TURN(?:OVER)?(?:\s+RATE)?.*?([\d,.]+)\s*[%$]?\s*$", re.IGNORECASE
+            )),
         ]
 
-        for line in lines:
+        # For OCR: two-pass approach.
+        # Pass 1: match on raw lines (handles values without spaces like "29941.28").
+        # Pass 2: match on OCR-cleaned lines but SKIP lines starting with TOTAL
+        #         to avoid collapsing separate column values (e.g. "274 100 691 29941.28").
+        num_lines = len(lines)
+
+        # Pass 1: raw lines
+        for i, line in enumerate(lines):
             for field, pattern in line_patterns:
                 if field in record:
                     continue
+
                 match = pattern.search(line)
                 if match:
-                    val = self._parse_analysis_value(match.group(1), field)
+                    raw = match.group(1)
+                    if is_ocr:
+                        raw = _clean_ocr_number(raw)
+                        raw = raw.rstrip("$")
+                    val = self._parse_analysis_value(raw, field)
                     if val is not None:
                         record[field] = val
+                    continue
+
+                # Try combining with next line (value on separate line)
+                if is_ocr and i + 1 < num_lines:
+                    combined = line.rstrip() + "  " + lines[i + 1].lstrip()
+                    match = pattern.search(combined)
+                    if match:
+                        raw = _clean_ocr_number(match.group(1))
+                        raw = raw.rstrip("$")
+                        val = self._parse_analysis_value(raw, field)
+                        if val is not None:
+                            record[field] = val
+
+        # Pass 2: OCR-cleaned lines for fields not yet captured.
+        # Skip TOTAL lines to avoid collapsing separate column values.
+        if is_ocr:
+            for i, line in enumerate(lines):
+                # Skip lines that start with TOTAL — cleaning merges columns
+                if re.match(r"\s*TOTAL\b", line, re.IGNORECASE):
+                    continue
+
+                cleaned = _clean_ocr_line(line)
+                for field, pattern in line_patterns:
+                    if field in record:
+                        continue
+
+                    match = pattern.search(cleaned)
+                    if match:
+                        raw = _clean_ocr_number(match.group(1))
+                        raw = raw.rstrip("$")
+                        val = self._parse_analysis_value(raw, field)
+                        if val is not None:
+                            record[field] = val
 
     def _parse_analysis_value(self, raw: str, field: str) -> Decimal | None:
         """Parse a value, handling percentages and small decimals."""
-        cleaned = raw.strip().rstrip("%")
-        if field in ("true_turnover", "stock_order_performance"):
+        cleaned = raw.strip().rstrip("%").rstrip("$")
+        if field in (
+            "true_turnover", "stock_order_performance",
+            "level_of_service", "gross_turnover",
+        ):
             # These are small decimal/percentage values, not currency
             cleaned = cleaned.replace("$", "").replace(",", "").strip()
             if not cleaned:
@@ -261,11 +399,19 @@ class PartsParser(BaseParser):
         return self.clean_currency(raw)
 
     def _extract_period(self, lines: list[str]) -> tuple[int, int]:
-        """Extract period month/year from header lines, defaulting to current date."""
+        """Extract period month/year from header lines, defaulting to current date.
+
+        Handles formats:
+        - Full date: MM/DD/YYYY or MM/DD/YY
+        - Month name: JANUARY 2026
+        - MM/YY period shorthand (common in OCR headers like "MM/Yx 02/26")
+        """
         import datetime
 
-        # Try to find a date in the first few header lines
+        # Full date: MM/DD/YYYY or MM/DD/YY
         date_pattern = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{2,4})")
+        # MM/YY shorthand (without day), e.g. "02/26" not followed by another /digit
+        mmyy_pattern = re.compile(r"(?<!\d/)(\d{2})/(\d{2})(?!/|\d)")
         month_names = {
             "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
             "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
@@ -284,7 +430,7 @@ class PartsParser(BaseParser):
                 if month and 2000 <= year <= 2100:
                     return (month, year)
 
-            # Try date format
+            # Try full date format MM/DD/YYYY or MM/DD/YY
             match = date_pattern.search(line)
             if match:
                 month = int(match.group(1))
@@ -292,6 +438,20 @@ class PartsParser(BaseParser):
                 year = year_raw if year_raw > 100 else 2000 + year_raw
                 if 1 <= month <= 12:
                     return (month, year)
+
+        # Second pass: look for MM/YY shorthand in headers (OCR often has this)
+        for line in lines[:10]:
+            line_upper = line.upper()
+            # Only match if line looks like a header (has keywords or is near top)
+            if any(kw in line_upper for kw in (
+                "MM/Y", "PAGE", "SUMMARY", "ANALYSIS", "BRANCH", "STORE",
+            )):
+                for match in mmyy_pattern.finditer(line):
+                    month = int(match.group(1))
+                    year_short = int(match.group(2))
+                    year = 2000 + year_short if year_short < 80 else 1900 + year_short
+                    if 1 <= month <= 12 and 2000 <= year <= 2100:
+                        return (month, year)
 
         # Default to current date
         today = datetime.date.today()

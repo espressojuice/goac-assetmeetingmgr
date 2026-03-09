@@ -4,7 +4,7 @@ Automate, standardize, and enforce accountability for asset/receivable meetings 
 
 ## Roadmap
 
-### Phase 1: Packet Generator + Flagging *(In Progress)*
+### Phase 1: Packet Generator + Flagging *(COMPLETE)*
 Parse R&R DMS exports (PDF schedules, GL reports) into structured data. Apply configurable flagging rules to surface issues. Generate standardized meeting packets and flagged-item reports.
 
 ### Phase 2: Accountability Web App
@@ -83,7 +83,7 @@ The parser framework processes R&R DMS PDF exports through a three-layer pipelin
 PDF Upload → PDFExtractor → ParserRouter → [InventoryParser, PartsParser, FinancialParser, OperationsParser] → ProcessingService → Database
 ```
 
-**PDFExtractor** (`parsers/pdf_extractor.py`) — Uses pdfplumber to extract text, lines, and tables from each PDF page into a standardized page dict format.
+**PDFExtractor** (`parsers/pdf_extractor.py`) — Uses pdfplumber to extract text, lines, and tables from each PDF page into a standardized page dict format. Falls back to OCR (EasyOCR + pypdfium2) for scanned pages with no text layer. Detects landscape pages and retries with 90° rotation.
 
 **ParserRouter** (`parsers/router.py`) — Routes pages to parsers based on section identifiers. Each page is matched to parser(s) that recognize its content. Unhandled pages are tracked for logging.
 
@@ -202,8 +202,10 @@ All routes are prefixed with `/api/v1`. Health check is at root `/health`.
 - [x] Flagged items report generator (red/yellow sections, response lines, 24-hour deadline)
 - [x] Upload API endpoints (18 endpoints, 5 route modules, Pydantic schemas)
 - [x] Simple upload web UI (vanilla HTML/JS served by FastAPI)
-- [ ] Test against Ashdown reference packet
-- [ ] Floorplan reconciliation (Schedule 237 vs 231/310 variance)
+- [x] Test against Ashdown reference packet (66 integration tests, all passing)
+- [x] Floorplan reconciliation (Schedule 237 vs 231/310 variance)
+- [x] Flagging engine validation against parsed Ashdown data (15 tests)
+- [x] Output PDF generation (packet + flagged items report)
 
 ## Quick Start
 
@@ -253,6 +255,16 @@ cd backend && alembic upgrade head
 cd backend && python3 -m pytest tests/ -v
 ```
 
+## Tested Against
+
+**Ashdown Classic Chevrolet** — 27-page scanned reference packet (02/11/2026):
+- 52 new vehicles, 60 used vehicles, 4 service loaners
+- 4 contracts in transit, 4 F&I chargebacks, 2 receivables, 2 policy adjustments
+- 58 open repair orders, 16 warranty claims, 3 missing titles, 2 slow-to-accounting
+- 3 parts analysis records, 2 floorplan reconciliations
+- 54 flags generated (34 red, 20 yellow)
+- Both output PDFs (packet + flagged items report) generated successfully
+
 ## Current Status
 
-**Phase 1 feature-complete** — Full data pipeline with REST API and upload UI. 16 models, 4 parsers, 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI, 242 tests passing. Remaining: Ashdown validation and floorplan reconciliation verification.
+**Phase 1 COMPLETE — Tested against Ashdown Classic Chevrolet reference packet (27 pages, 02/11/2026).** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).

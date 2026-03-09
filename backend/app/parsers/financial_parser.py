@@ -23,6 +23,25 @@ _RECEIVABLE_TYPE_MAP = {
 }
 
 
+def _ocr_clean_currency(value: str | None) -> str | None:
+    """Pre-clean OCR currency artifacts before passing to clean_currency.
+
+    Handles: "~" as negative, double commas "1,,688.80", trailing dots "3174."
+    """
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    # "~" at start means negative
+    if cleaned.startswith("~"):
+        cleaned = "-" + cleaned[1:]
+    # Double commas from OCR noise
+    cleaned = cleaned.replace(",,", ",")
+    # Trailing dot with no decimals (e.g. "3174.") — keep as-is, Decimal handles it
+    return cleaned
+
+
 class FinancialParser(BaseParser):
     """Parser for financial reports: receivables, F&I chargebacks, CIT, prepaids, policy adjustments."""
 
@@ -30,20 +49,25 @@ class FinancialParser(BaseParser):
         # Receivables
         "SCHEDULE 200",
         "SCHEDULE 220",
+        "SCHEDULE#: 200",
+        "SCHEDULE#: 220",
         "GL 2612",
         "P&S RECEIVABLE",
         "PARTS & SERVICE RECEIVABLE",
+        "ACCOUNTS RECEIVABLE",
         "WHOLESALE RECEIVABLE",
+        "WHOLESALES 220",
         "FACTORY RECEIVABLE",
         # F&I Chargebacks
         "CHARGEBACK",
         "F&I CHARGE",
         "FINANCE CHARGE",
+        "FEI CHARGEBACK",
         # Contracts in Transit
         "SCHEDULE 205",
+        "SCHEDULE#: 205",
         "CONTRACT IN TRANSIT",
         "CONTRACTS IN TRANSIT",
-        "CIT",
         # Prepaids
         "GL 2741",
         "PREPAID",
@@ -51,19 +75,26 @@ class FinancialParser(BaseParser):
         "GL 15A",
         "GL 15B",
         "POLICY ADJUST",
+        "POLICY ADJ",
     ]
 
     _RECEIVABLE_IDENTIFIERS = [
-        "SCHEDULE 200", "SCHEDULE 220", "GL 2612",
+        "SCHEDULE 200", "SCHEDULE 220", "SCHEDULE#: 200", "SCHEDULE#: 220",
+        "GL 2612",
         "P&S RECEIVABLE", "PARTS & SERVICE RECEIVABLE",
-        "WHOLESALE RECEIVABLE", "FACTORY RECEIVABLE",
+        "ACCOUNTS RECEIVABLE",
+        "WHOLESALE RECEIVABLE", "WHOLESALES 220",
+        "FACTORY RECEIVABLE",
     ]
-    _CHARGEBACK_IDENTIFIERS = ["CHARGEBACK", "F&I CHARGE", "FINANCE CHARGE"]
+    _CHARGEBACK_IDENTIFIERS = [
+        "CHARGEBACK", "F&I CHARGE", "FINANCE CHARGE", "FEI CHARGEBACK",
+    ]
     _CIT_IDENTIFIERS = [
-        "SCHEDULE 205", "CONTRACT IN TRANSIT", "CONTRACTS IN TRANSIT", "CIT",
+        "SCHEDULE 205", "SCHEDULE#: 205",
+        "CONTRACT IN TRANSIT", "CONTRACTS IN TRANSIT",
     ]
     _PREPAID_IDENTIFIERS = ["GL 2741", "PREPAID"]
-    _POLICY_IDENTIFIERS = ["GL 15A", "GL 15B", "POLICY ADJUST"]
+    _POLICY_IDENTIFIERS = ["GL 15A", "GL 15B", "POLICY ADJUST", "POLICY ADJ"]
 
     @classmethod
     def can_handle(cls, page_text: str) -> bool:
@@ -86,10 +117,42 @@ class FinancialParser(BaseParser):
         if any(ident.upper() in text_upper for ident in cls._CHARGEBACK_IDENTIFIERS):
             return True
 
-        # Also check for account 850/851 but only with F&I/chargeback context
+        # Check for account 850/851 with F&I/chargeback/GL INQUIRY context
         has_850_851 = bool(re.search(r"\b85[01]A?\b", text_upper))
-        has_context = "CHARGEBACK" in text_upper or "F&I" in text_upper or "F & I" in text_upper
+        has_context = (
+            "CHARGEBACK" in text_upper
+            or "F&I" in text_upper
+            or "F & I" in text_upper
+            or "FEI" in text_upper
+            or "GL INQUIRY" in text_upper
+        )
         if has_850_851 and has_context:
+            return True
+
+        # Handle OCR variations: "ACCOU:T 850", "AccOUNT 851A"
+        if bool(re.search(r"ACCOU.?T\s+85[01]A?", text_upper)):
+            return True
+
+        # OCR variations for chargeback accounts: 8504 = 850A, 8514 = 851A
+        if bool(re.search(r"\b850[4]\b|\b851[4]\b", text_upper)):
+            has_ocr_context = (
+                "FEI" in text_upper
+                or "F&I" in text_upper
+                or "CHARGEBACK" in text_upper
+                or "GL INQUIRY" in text_upper
+                or bool(re.search(r"ACCOU.?T", text_upper))
+            )
+            if has_ocr_context:
+                return True
+
+        # OCR variations for policy adjustments: "154" for "15A", "15B" with POLIC context
+        if bool(re.search(r"\b15[4AB]\b", text_upper)) and (
+            "POLIC" in text_upper or "ADJ" in text_upper
+        ):
+            return True
+
+        # OCR variation for Schedule#: with garbled prefix
+        if bool(re.search(r"DULE#?:?\s*(200|220|205)\b", text_upper)):
             return True
 
         return False
@@ -105,7 +168,7 @@ class FinancialParser(BaseParser):
         for page in pages:
             text_upper = page["text"].upper()
 
-            if self._matches(text_upper, self._RECEIVABLE_IDENTIFIERS):
+            if self._matches(text_upper, self._RECEIVABLE_IDENTIFIERS) or self._matches_ocr_receivable(text_upper):
                 records = self._parse_receivable_page(page)
                 receivables.extend(records)
 
@@ -113,7 +176,7 @@ class FinancialParser(BaseParser):
                 records = self._parse_chargeback_page(page)
                 chargebacks.extend(records)
 
-            if self._matches(text_upper, self._CIT_IDENTIFIERS):
+            if self._matches(text_upper, self._CIT_IDENTIFIERS) or self._matches_ocr_cit(text_upper):
                 records = self._parse_cit_page(page)
                 cit_records.extend(records)
 
@@ -121,7 +184,7 @@ class FinancialParser(BaseParser):
                 records = self._parse_prepaid_page(page)
                 prepaids.extend(records)
 
-            if self._matches(text_upper, self._POLICY_IDENTIFIERS):
+            if self._matches(text_upper, self._POLICY_IDENTIFIERS) or self._matches_ocr_policy(text_upper):
                 records = self._parse_policy_page(page)
                 adjustments.extend(records)
 
@@ -146,13 +209,48 @@ class FinancialParser(BaseParser):
     def _matches(self, text_upper: str, identifiers: list[str]) -> bool:
         return any(ident.upper() in text_upper for ident in identifiers)
 
+    def _matches_ocr_receivable(self, text_upper: str) -> bool:
+        """Check for OCR-garbled receivable identifiers."""
+        # "SCHEDULE#: 200" or "SCHEDULE#: 220" with OCR prefix damage
+        return bool(re.search(r"DULE#?:?\s*(200|220)\b", text_upper))
+
+    def _matches_ocr_cit(self, text_upper: str) -> bool:
+        """Check for OCR-garbled CIT identifiers."""
+        return bool(re.search(r"DULE#?:?\s*205\b", text_upper))
+
+    def _matches_ocr_policy(self, text_upper: str) -> bool:
+        """Check for OCR-garbled policy adjustment identifiers."""
+        # "154" for "15A", "15B" near POLIC or ADJ context
+        return bool(re.search(r"\b15[4AB]\b", text_upper)) and (
+            "POLIC" in text_upper or "ADJ" in text_upper
+        )
+
     def _has_chargeback_context(self, text_upper: str) -> bool:
         """Check for chargeback section with context awareness."""
         if any(ident.upper() in text_upper for ident in self._CHARGEBACK_IDENTIFIERS):
             return True
         has_850_851 = bool(re.search(r"\b85[01]A?\b", text_upper))
         has_context = "CHARGEBACK" in text_upper or "F&I" in text_upper or "F & I" in text_upper
-        return has_850_851 and has_context
+        if has_850_851 and has_context:
+            return True
+
+        # OCR: "8504" = "850A", "8514" = "851A", or ACCOU:T patterns
+        has_ocr_acct = bool(re.search(r"ACCOU.?T\s+85[01]", text_upper))
+        has_ocr_variant = bool(re.search(r"\b850[4]\b|\b851[4]\b", text_upper))
+        if has_ocr_acct or has_ocr_variant:
+            ocr_context = (
+                "FEI" in text_upper or "F&I" in text_upper
+                or "CHARGEBACK" in text_upper or "GL INQUIRY" in text_upper
+                or "OPEN" in text_upper  # "OPEN BALANCE" appears in OCR headers
+            )
+            if has_ocr_acct or ocr_context:
+                return True
+
+        return False
+
+    def _is_ocr_page(self, page: dict) -> bool:
+        """Check if a page was processed via OCR."""
+        return bool(page.get("ocr_used"))
 
     # --- Receivables ---
 
@@ -160,21 +258,29 @@ class FinancialParser(BaseParser):
         """Parse receivable aging data for schedules 200, 220, GL 2612."""
         records = []
         text_upper = page["text"].upper()
+        is_ocr = self._is_ocr_page(page)
 
         # Determine which receivable type(s) are on this page
         for schedule_num, recv_type in _RECEIVABLE_TYPE_MAP.items():
             key = f"SCHEDULE {schedule_num}" if schedule_num != "2612" else f"GL {schedule_num}"
             if key not in text_upper:
-                # Also check for descriptive names
+                # Also check for descriptive names and OCR patterns
                 name_checks = {
-                    "200": ["P&S RECEIVABLE", "PARTS & SERVICE RECEIVABLE"],
-                    "220": ["WHOLESALE RECEIVABLE"],
+                    "200": ["P&S RECEIVABLE", "PARTS & SERVICE RECEIVABLE", "ACCOUNTS RECEIVABLE"],
+                    "220": ["WHOLESALE RECEIVABLE", "WHOLESALES 220"],
                     "2612": ["FACTORY RECEIVABLE"],
                 }
-                if not any(name in text_upper for name in name_checks.get(schedule_num, [])):
+                found = any(name in text_upper for name in name_checks.get(schedule_num, []))
+                # Also check OCR-garbled schedule headers
+                if not found and bool(re.search(rf"DULE#?:?\s*{schedule_num}\b", text_upper)):
+                    found = True
+                if not found:
                     continue
 
-            record = self._extract_receivable(page, schedule_num, recv_type)
+            if is_ocr:
+                record = self._extract_receivable_ocr(page, schedule_num, recv_type)
+            else:
+                record = self._extract_receivable(page, schedule_num, recv_type)
             if record:
                 records.append(record)
 
@@ -196,6 +302,58 @@ class FinancialParser(BaseParser):
             self._extract_aging_from_lines(page["lines"], aging)
 
         # Need at least a total to create a record
+        if aging["total_balance"] is None and aging["current_balance"] is None:
+            return None
+
+        return {
+            "receivable_type": recv_type,
+            "schedule_number": schedule_num,
+            "current_balance": aging["current_balance"] or Decimal("0"),
+            "over_30": aging["over_30"] or Decimal("0"),
+            "over_60": aging["over_60"] or Decimal("0"),
+            "over_90": aging["over_90"] or Decimal("0"),
+            "total_balance": aging["total_balance"] or (aging["current_balance"] or Decimal("0")),
+        }
+
+    def _extract_receivable_ocr(self, page: dict, schedule_num: str, recv_type: str) -> dict | None:
+        """Extract receivable data from OCR text using line-based parsing.
+
+        Looks for 'Report Total' line and extracts total_balance and aging buckets.
+        OCR format: 'Report Total  2796.80  2796.80  0  0  0  0'
+        """
+        aging = {"current_balance": None, "over_30": None, "over_60": None, "over_90": None, "total_balance": None}
+
+        lines = page["lines"]
+        for line in lines:
+            line_upper = line.upper().strip()
+            # Look for "Report Total" line
+            if re.search(r"REPORT\s+TOTAL", line_upper):
+                # Extract all currency amounts from the line
+                amounts = re.findall(r"[~\-]?[\d,]+\.?\d*", line)
+                cleaned_amounts = []
+                for amt_str in amounts:
+                    val = self.clean_currency(_ocr_clean_currency(amt_str))
+                    if val is not None:
+                        cleaned_amounts.append(val)
+
+                if cleaned_amounts:
+                    # First amount is total, second is current, then 31-60, 61-90, etc.
+                    aging["total_balance"] = cleaned_amounts[0]
+                    if len(cleaned_amounts) > 1:
+                        aging["current_balance"] = cleaned_amounts[1]
+                    if len(cleaned_amounts) > 2:
+                        aging["over_30"] = cleaned_amounts[2]
+                    if len(cleaned_amounts) > 3:
+                        aging["over_60"] = cleaned_amounts[3]
+                    if len(cleaned_amounts) > 4:
+                        aging["over_90"] = cleaned_amounts[4]
+                break
+
+        # Need at least a total to create a record
+        if aging["total_balance"] is None and aging["current_balance"] is None:
+            # Fallback: try the standard line parser
+            self._extract_aging_from_lines(lines, aging)
+
         if aging["total_balance"] is None and aging["current_balance"] is None:
             return None
 
@@ -265,6 +423,12 @@ class FinancialParser(BaseParser):
     def _parse_chargeback_page(self, page: dict) -> list[dict]:
         """Parse F&I chargeback data (accounts 850, 850A, 851, 851A)."""
         records = []
+        is_ocr = self._is_ocr_page(page)
+
+        if is_ocr:
+            # Skip table extraction for OCR — tables are unreliable
+            records = self._parse_chargeback_ocr(page["lines"], page["text"])
+            return records
 
         # Try table extraction
         if page.get("tables"):
@@ -347,11 +511,118 @@ class FinancialParser(BaseParser):
 
         return records
 
+    def _parse_chargeback_ocr(self, lines: list[str], full_text: str) -> list[dict]:
+        """Parse chargeback data from OCR text using GL INQUIRY format.
+
+        OCR format:
+            ACCOUNT  850  c/s  FEI  CHARGEBACK  OPEN  BALANCE
+            5142                          <- opening balance
+            ...transactions...
+            CLOSING  BALANCE  5142        <- closing balance
+
+        For 850A (OCR'd as 8504):
+            ACCOUNT  8504  cls  FEI  DAY  OPEN  BALANCE
+            261
+            ...
+            CLOSING  BALANCE  1543
+        """
+        records = []
+
+        # Normalize OCR account numbers: "8504" -> "850A", "8514" -> "851A"
+        # Pattern: ACCOUNT line with 850/851/850A/851A or OCR variants
+        account_pattern = re.compile(
+            r"ACCOU.?T\s+(850A?|851A?|8504|8514)\b",
+            re.IGNORECASE,
+        )
+
+        # OCR renders "BALANCE" as "BALLCE", "BALWICE", etc. — use BAL\w*
+        closing_pattern = re.compile(
+            r"CLOSING\s+BAL\w*\s+([~\-]?[\d,]+\.?\d*)",
+            re.IGNORECASE,
+        )
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            acct_match = account_pattern.search(line)
+
+            if acct_match:
+                raw_account = acct_match.group(1).upper()
+                # Normalize OCR variants
+                account = self._normalize_ocr_account(raw_account)
+                is_a_account = account.endswith("A")
+
+                # Next non-empty line should be the opening balance
+                opening_balance = None
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].strip()
+                    if next_line:
+                        # Try to extract a number — allow OCR spaces (e.g. "4020  38")
+                        collapsed = re.sub(r"\s+", "", next_line)
+                        amt_match = re.match(r"^[~\-]?[\d,]+\.?\d*$", collapsed)
+                        if amt_match:
+                            opening_balance = self.clean_currency(
+                                _ocr_clean_currency(collapsed)
+                            )
+                        break
+                    j += 1
+
+                # Find CLOSING BALANCE line
+                closing_balance = None
+                k = j + 1 if j < len(lines) else i + 1
+                while k < len(lines):
+                    close_match = closing_pattern.search(lines[k])
+                    if close_match:
+                        closing_balance = self.clean_currency(
+                            _ocr_clean_currency(close_match.group(1))
+                        )
+                        i = k  # Advance past closing line
+                        break
+                    # Stop if we hit another ACCOUNT line
+                    if account_pattern.search(lines[k]):
+                        break
+                    k += 1
+
+                # Use closing balance as current; for A accounts it's over_90
+                current = closing_balance or opening_balance or Decimal("0")
+                over_90 = Decimal("0")
+                if is_a_account:
+                    over_90 = current
+
+                records.append({
+                    "account_number": account,
+                    "account_description": None,
+                    "current_balance": current,
+                    "over_90_balance": over_90,
+                })
+
+            i += 1
+
+        return records
+
+    @staticmethod
+    def _normalize_ocr_account(raw: str) -> str:
+        """Normalize OCR-garbled account numbers.
+
+        '8504' -> '850A', '8514' -> '851A', etc.
+        """
+        mapping = {
+            "8504": "850A",
+            "8514": "851A",
+        }
+        return mapping.get(raw, raw)
+
     # --- Contracts in Transit ---
 
     def _parse_cit_page(self, page: dict) -> list[dict]:
         """Parse contracts in transit (schedule 205)."""
         records = []
+        is_ocr = self._is_ocr_page(page)
+
+        if is_ocr:
+            records = self._parse_cit_ocr(page["lines"])
+            return records
 
         if page.get("tables"):
             for table in page["tables"]:
@@ -379,8 +650,7 @@ class FinancialParser(BaseParser):
         sale_date = self.parse_date(
             row.get("sale_date") or row.get("date") or row.get("sold_date")
         )
-        if not sale_date:
-            return None
+        # sale_date is optional — OCR scans often don't have it
 
         days = self.clean_int(
             row.get("days_in_transit") or row.get("days") or row.get("age")
@@ -432,6 +702,71 @@ class FinancialParser(BaseParser):
                 "days_in_transit": int(match.group(4)),
                 "amount": amount,
                 "lender": match.group(6).strip() if match.group(6) else None,
+            })
+
+        return records
+
+    def _parse_cit_ocr(self, lines: list[str]) -> list[dict]:
+        """Parse contracts in transit from OCR text.
+
+        OCR format:
+            678  MAURILIO V GONZALES  28,281.61  28,281.61  FUNDED 2/9 JALLY
+            684  DEBBIE LASCHERON THOMPSON  13,351.15  13,351.15 FUNDED 2/5 WESTLAKE
+            691  ABBY LYNN SHIRRON  RESENT CONSRACT zTG.EXETER WILH HIT TODAY
+            710  JANA ANNETTE MORRIS  -15,000.00  READY TO TURA RED RIVER
+            695  LARRY BROWN  WIRE 41,575.20  ~41,575.20  CASH DEAL COMING TODAY
+
+        Lines start with a deal number (3-4 digits), followed by customer name,
+        then optional amounts. Some lines have no amounts (just remarks).
+        """
+        records = []
+
+        # Match lines starting with a 3-4 digit deal number
+        deal_pattern = re.compile(
+            r"^\s*(\d{3,4})\s+"  # deal number
+            r"([A-Z][A-Z\s]+?)"  # customer name (uppercase words)
+            r"(?:\s{2,}|\s+(?=[~\-\d$]))"  # separator before amounts or end
+            r"(.*)"  # rest of line (amounts + remarks)
+        , re.IGNORECASE)
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _SKIP_PATTERNS.match(stripped):
+                continue
+
+            match = deal_pattern.match(stripped)
+            if not match:
+                continue
+
+            deal_num = match.group(1)
+            customer_name = match.group(2).strip()
+            rest = match.group(3).strip()
+
+            # Extract amounts from the rest of the line
+            # Find all currency-like values (including ~ prefix for negative)
+            amount_matches = re.findall(r"[~\-]?[\d,]+\.?\d*", rest)
+            amounts = []
+            for amt_str in amount_matches:
+                val = self.clean_currency(_ocr_clean_currency(amt_str))
+                if val is not None:
+                    amounts.append(val)
+
+            if not amounts:
+                # Line has no amounts (just remarks) — skip
+                continue
+
+            # First amount is typically the total/contract amount
+            amount = amounts[0]
+
+            records.append({
+                "deal_number": deal_num,
+                "customer_name": customer_name or None,
+                "sale_date": None,
+                "days_in_transit": 0,
+                "amount": amount,
+                "lender": None,
             })
 
         return records
@@ -507,6 +842,11 @@ class FinancialParser(BaseParser):
     def _parse_policy_page(self, page: dict) -> list[dict]:
         """Parse policy adjustments (GL 15A/15B)."""
         records = []
+        is_ocr = self._is_ocr_page(page)
+
+        if is_ocr:
+            records = self._parse_policy_ocr(page["lines"], page["text"])
+            return records
 
         if page.get("tables"):
             for table in page["tables"]:
@@ -571,3 +911,79 @@ class FinancialParser(BaseParser):
             })
 
         return records
+
+    def _parse_policy_ocr(self, lines: list[str], full_text: str) -> list[dict]:
+        """Parse policy adjustments from OCR text using GL INQUIRY format.
+
+        OCR format:
+            ACCOU:T  154  POLIC?  ADJ  NEN  OPEN  BALANCE
+            3.40
+            ...
+            CLOSING  BALANCE  133.40
+
+        For 15B:
+            ACCOUNT  15B  POLICY ADJ  USD  OPEN  BALACE
+            2781
+            ...
+            CLOSING  BALANCE  3174.
+        """
+        records = []
+
+        # Pattern for ACCOUNT line with 15A/15B or OCR variants (154 = 15A)
+        account_pattern = re.compile(
+            r"ACCOU.?T\s+(15[A4B])\b",
+            re.IGNORECASE,
+        )
+        closing_pattern = re.compile(
+            r"CLOSING\s+BAL\w*\s+([~\-]?[\d,]+\.?\d*)",
+            re.IGNORECASE,
+        )
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            acct_match = account_pattern.search(line)
+
+            if acct_match:
+                raw_gl = acct_match.group(1).upper()
+                # Normalize: "154" -> "15A"
+                gl_account = self._normalize_ocr_gl(raw_gl)
+
+                # Find CLOSING BALANCE
+                closing_balance = None
+                k = i + 1
+                while k < len(lines):
+                    close_match = closing_pattern.search(lines[k])
+                    if close_match:
+                        closing_balance = self.clean_currency(
+                            _ocr_clean_currency(close_match.group(1))
+                        )
+                        i = k
+                        break
+                    # Stop if we hit another ACCOUNT line
+                    if account_pattern.search(lines[k]):
+                        break
+                    k += 1
+
+                if closing_balance is not None:
+                    records.append({
+                        "gl_account": gl_account,
+                        "description": f"Policy Adjustment {gl_account}",
+                        "amount": closing_balance,
+                        "adjustment_date": None,
+                    })
+
+            i += 1
+
+        return records
+
+    @staticmethod
+    def _normalize_ocr_gl(raw: str) -> str:
+        """Normalize OCR-garbled GL account numbers.
+
+        '154' -> '15A' (OCR reads 'A' as '4')
+        """
+        mapping = {
+            "154": "15A",
+        }
+        return mapping.get(raw, raw)
