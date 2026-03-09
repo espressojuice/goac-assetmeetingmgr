@@ -75,3 +75,36 @@
 - Tightened all integration test assertions to exact counts
 - 308 tests passing (242 unit + 66 integration)
 - Phase 1 COMPLETE
+
+# Phase 2 Tasks
+
+- [x] Add Phase 2 database models (User, FlagAssignment, FlagResponseRecord, Notification, MeetingAttendance)
+- [x] Set up Google OAuth authentication (backend JWT + NextAuth callback)
+- [x] Initialize Next.js frontend with NextAuth
+- [x] Build corporate dashboard (multi-store overview)
+- [ ] Build store detail page
+- [ ] Build meeting detail page with tabbed data view
+- [ ] Build flag response workflow (assignment + response form)
+- [ ] Build email notification service (SendGrid)
+- [ ] Implement automated reminders (24h deadline, overdue)
+- [ ] Implement repeat flag detection and auto-escalation
+- [ ] Build manager response page
+- [ ] Add role-based access control to all routes
+- [ ] Build notification center (in-app)
+
+## Session Log
+
+### Session 7 — 2026-03-09 (Phase 2 Foundation)
+- Added 5 new models: User (with roles), FlagAssignment, FlagResponseRecord, Notification, MeetingAttendance
+- 5 new enums: UserRole, AssignmentStatus, NotificationType
+- Alembic migration 002 for all Phase 2 tables
+- Auth system: JWT creation/validation, Google OAuth callback, role-based dependency injection
+- 2 new API routes: POST /auth/callback, GET /auth/me
+- 1 new API route: GET /dashboard (aggregated multi-store overview with flag stats)
+- Config extended with JWT_SECRET_KEY, GOOGLE_CLIENT_ID/SECRET, FRONTEND_URL
+- Requirements: added authlib, python-jose[cryptography], bcrypt
+- Next.js frontend scaffolded: NextAuth with Google provider, Tailwind CSS
+- Pages: landing (sign-in), dashboard (store cards + summary bar + flag chart), store detail, meeting detail (tabbed: packet data / flags / responses)
+- Components: Navbar, StoreCard, SummaryBar, FlagSummaryChart
+- Docker-compose updated with frontend service + auth env vars
+- 14 new tests (auth + dashboard), 255 unit tests all passing

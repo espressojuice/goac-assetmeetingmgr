@@ -16,18 +16,28 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://goac:${POSTGRES_PASSWORD:-goac_dev}@db:5432/goac
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      FRONTEND_URL: http://localhost:3000
     depends_on:
       - db
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
 
-  # frontend:
-  #   build: ./frontend
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - backend
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me-in-production}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
 
 volumes:
   pgdata:

@@ -26,3 +26,4 @@
 - **2026-03-09**: OCR uses `"` and `'` as negative sign prefixes (e.g. `"24,900.00` = `-24,900.00`). Replace these with `-` before currency parsing.
 - **2026-03-09**: When testing PDF generators without a DB, use MockObj with `__getattr__` returning None for missing attrs, and wrap string enum fields in _EnumLike objects that provide `.value` and `__hash__`.
 - **2026-03-09**: FlaggingEngine._evaluate_record works with any object that supports getattr — just wrap parsed dicts in a simple class. No DB needed for flag evaluation.
+- **2026-03-09**: When adding new SQLAlchemy models with relationships to existing models, ensure the string-referenced class name in `Mapped[List["ClassName"]]` matches the actual class name exactly (e.g., `FlagResponseRecord` not `FlagResponse`).

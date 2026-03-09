@@ -23,6 +23,15 @@ from app.models.operations import (
     SlowToAccounting,
 )
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
+from app.models.user import User, UserRole
+from app.models.accountability import (
+    FlagAssignment,
+    FlagResponseRecord,
+    Notification,
+    MeetingAttendance,
+    AssignmentStatus,
+    NotificationType,
+)
 
 __all__ = [
     # Core
@@ -56,4 +65,14 @@ __all__ = [
     "FlagCategory",
     "FlagSeverity",
     "FlagStatus",
+    # Users & Auth
+    "User",
+    "UserRole",
+    # Accountability
+    "FlagAssignment",
+    "FlagResponseRecord",
+    "Notification",
+    "MeetingAttendance",
+    "AssignmentStatus",
+    "NotificationType",
 ]

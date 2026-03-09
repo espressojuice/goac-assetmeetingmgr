@@ -12,3 +12,6 @@ python-dateutil
 httpx
 pytest
 asyncpg
+authlib
+python-jose[cryptography]
+bcrypt

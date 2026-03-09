@@ -7,8 +7,8 @@ Automate, standardize, and enforce accountability for asset/receivable meetings 
 ### Phase 1: Packet Generator + Flagging *(COMPLETE)*
 Parse R&R DMS exports (PDF schedules, GL reports) into structured data. Apply configurable flagging rules to surface issues. Generate standardized meeting packets and flagged-item reports.
 
-### Phase 2: Accountability Web App
-Web interface for meeting scheduling, packet review, flag responses, and escalation tracking. Google Calendar integration for automated scheduling. Email notifications via SendGrid/Postmark.
+### Phase 2: Accountability Web App *(IN PROGRESS)*
+Web interface for meeting scheduling, packet review, flag responses, and escalation tracking. Google OAuth authentication with role-based access. Next.js frontend with corporate dashboard, store detail, and meeting detail pages. Email notifications via SendGrid/Postmark.
 
 ### Phase 3: Full Automation
 Automated DMS export ingestion, trend analysis, cross-store benchmarking, and executive dashboards.
@@ -16,13 +16,14 @@ Automated DMS export ingestion, trend analysis, cross-store benchmarking, and ex
 ## Tech Stack
 
 - **Backend**: FastAPI (Python) + PostgreSQL + SQLAlchemy + Alembic
-- **Frontend**: Next.js
+- **Frontend**: Next.js 14 (App Router) + NextAuth + Tailwind CSS
+- **Auth**: Google OAuth via NextAuth → backend JWT
 - **APIs**: Google Calendar API, SendGrid/Postmark
 - **Data Sources**: R&R DMS PDF exports
 
 ## Data Models
 
-16 models across 7 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
+21 models across 9 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
 
 ### Core
 | Model | Table | Description |
@@ -66,6 +67,19 @@ Automated DMS export ingestion, trend analysis, cross-store benchmarking, and ex
 |-------|-------|-------------|
 | Flag | `flags` | Flagged items with severity, category, and response tracking |
 
+### Users & Auth (`user.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| User | `users` | Users with Google OAuth, roles, and login tracking |
+
+### Accountability (`accountability.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| FlagAssignment | `flag_assignments` | Assign flags to users with deadlines |
+| FlagResponseRecord | `flag_responses` | Individual responses to assigned flags |
+| Notification | `notifications` | In-app and email notifications |
+| MeetingAttendance | `meeting_attendance` | Track who attended each meeting |
+
 ### Enums
 - `MeetingStatus`: pending, processing, completed, error
 - `ReconciliationType`: new_237, used_240
@@ -74,6 +88,9 @@ Automated DMS export ingestion, trend analysis, cross-store benchmarking, and ex
 - `FlagCategory`: inventory, parts, financial, operations
 - `FlagSeverity`: yellow, red
 - `FlagStatus`: open, responded, escalated
+- `UserRole`: corporate, gm, manager, viewer
+- `AssignmentStatus`: pending, acknowledged, responded, overdue, escalated
+- `NotificationType`: flag_assigned, deadline_reminder, overdue_notice, escalation, response_received
 
 ## Parser Architecture
 
@@ -193,6 +210,17 @@ All routes are prefixed with `/api/v1`. Health check is at root `/health`.
 | GET | `/api/v1/meetings/{meeting_id}` | Get meeting details |
 | GET | `/api/v1/meetings/{meeting_id}/data/{category}` | Get parsed data by category (inventory/parts/financial/operations) |
 
+### Auth (Phase 2)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/auth/callback` | Google OAuth callback — creates/updates user, returns JWT |
+| GET | `/api/v1/auth/me` | Get current user profile (requires JWT) |
+
+### Dashboard (Phase 2)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/dashboard` | Aggregated multi-store overview with flag stats |
+
 ## Phase 1 Deliverables
 
 - [x] PostgreSQL data models for all report categories
@@ -267,4 +295,6 @@ cd backend && python3 -m pytest tests/ -v
 
 ## Current Status
 
-**Phase 1 COMPLETE — Tested against Ashdown Classic Chevrolet reference packet (27 pages, 02/11/2026).** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).
+**Phase 1 COMPLETE.** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).
+
+**Phase 2 IN PROGRESS.** Auth system (Google OAuth + JWT), 5 new accountability models, corporate dashboard endpoint, Next.js frontend with NextAuth. 21 API endpoints. 269 unit tests passing.
