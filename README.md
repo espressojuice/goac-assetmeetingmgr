@@ -201,10 +201,43 @@ All routes are prefixed with `/api/v1`. Health check is at root `/health`.
 - [x] Standardized PDF packet generator (9 sections, color-coded tables, footers)
 - [x] Flagged items report generator (red/yellow sections, response lines, 24-hour deadline)
 - [x] Upload API endpoints (18 endpoints, 5 route modules, Pydantic schemas)
-- [ ] Simple upload web UI
+- [x] Simple upload web UI (vanilla HTML/JS served by FastAPI)
+- [ ] Test against Ashdown reference packet
 - [ ] Floorplan reconciliation (Schedule 237 vs 231/310 variance)
 
-## Setup
+## Quick Start
+
+```bash
+# 1. Start PostgreSQL
+docker compose up -d db
+
+# 2. Set up backend
+cd backend
+python3 -m pip install -r requirements.txt
+alembic upgrade head
+
+# 3. Run the server
+uvicorn app.main:app --reload
+
+# 4. Open the UI
+open http://localhost:8000
+```
+
+Or with Docker Compose:
+
+```bash
+docker compose up -d
+# Open http://localhost:8000
+```
+
+The upload UI lets you:
+1. Create/select a store
+2. Upload R&R report PDFs (drag-and-drop or file picker)
+3. View processing results (records parsed, flags generated)
+4. Download the standardized packet and flagged items report PDFs
+5. Review flagged items with severity/category filters
+
+## Setup (Development)
 
 ```bash
 # Copy environment file
@@ -215,8 +248,11 @@ docker compose up -d
 
 # Run migrations
 cd backend && alembic upgrade head
+
+# Run tests
+cd backend && python3 -m pytest tests/ -v
 ```
 
 ## Current Status
 
-**Phase 1 in progress** — Full data pipeline with REST API. 16 models, 4 parsers, 15 flagging rules, 2 PDF generators, 18 API endpoints, 242 tests passing. Web UI next.
+**Phase 1 feature-complete** — Full data pipeline with REST API and upload UI. 16 models, 4 parsers, 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI, 242 tests passing. Remaining: Ashdown validation and floorplan reconciliation verification.

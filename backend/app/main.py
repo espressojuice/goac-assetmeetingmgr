@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.api.routes.upload import router as upload_router
@@ -18,6 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API routes
 app.include_router(upload_router, prefix="/api/v1", tags=["upload"])
 app.include_router(packets_router, prefix="/api/v1", tags=["packets"])
 app.include_router(flags_router, prefix="/api/v1", tags=["flags"])
@@ -28,3 +31,12 @@ app.include_router(meetings_router, prefix="/api/v1", tags=["meetings"])
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "app": settings.APP_NAME}
+
+
+@app.get("/")
+async def serve_ui():
+    return FileResponse("app/static/index.html")
+
+
+# Static file serving (must be after route definitions)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")

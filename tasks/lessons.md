@@ -10,3 +10,4 @@
 - **2026-03-08**: FastAPI's UploadFile with Form() fields works for multipart uploads. Use Body() for JSON payloads in non-upload routes. Pydantic response schemas with response_model give you auto-validation and OpenAPI docs for free.
 - **2026-03-08**: Python 3.9 doesn't support `str | None` or `list[X]` in runtime annotations. Use `from __future__ import annotations` or `Optional[str]` / `List[X]` from typing. Always check target Python version.
 - **2026-03-08**: For httpx test client with FastAPI bulk file uploads, the `files` param field name must match the FastAPI parameter name exactly (e.g., `files` not `file`).
+- **2026-03-09**: For Phase 1, a single HTML file with vanilla JS served by FastAPI is faster than setting up Next.js. Save the full frontend framework for Phase 2 when we need the accountability dashboard, auth, and real-time updates.

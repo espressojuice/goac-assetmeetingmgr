@@ -13,7 +13,7 @@
 - [x] Build standardized PDF packet generator
 - [x] Build flagged items report generator
 - [x] Build upload API endpoints
-- [ ] Build simple upload web UI
+- [x] Build simple upload web UI
 - [ ] Test against Ashdown reference packet
 - [ ] Validate floorplan reconciliation output (237 vs 231/310 variance)
 
@@ -39,3 +39,10 @@
 - Pydantic response schemas for all endpoints (auto-validation + OpenAPI docs)
 - 55 new API tests (in-memory SQLite + httpx AsyncClient), 242 total all passing
 - Full pipeline now accessible via REST API
+
+### Session 4 — 2026-03-09
+- Built single-page upload web UI (vanilla HTML/CSS/JS served by FastAPI)
+- Store selection with inline create form, drag-and-drop PDF upload, processing status with results summary
+- Flags preview table with severity/category filters, recent meetings sidebar with download links
+- Responsive layout (tablet-friendly), GOAC blue (#003366) branding, color-coded flags
+- 242 tests still passing — Phase 1 feature-complete

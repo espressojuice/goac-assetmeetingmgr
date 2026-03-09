@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GOAC Asset Meeting Manager</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header>
+  <h1>GOAC Asset Meeting Manager</h1>
+  <p class="subtitle">Packet Generator &amp; Flagging Engine</p>
+</header>
+
+<main>
+  <!-- Store Selection -->
+  <section class="card" id="store-section">
+    <h2>1. Select Store</h2>
+    <div class="store-row">
+      <select id="store-select">
+        <option value="">-- Select a store --</option>
+      </select>
+      <button id="toggle-new-store" class="btn btn-secondary">+ Add New Store</button>
+    </div>
+
+    <div id="new-store-form" class="hidden">
+      <h3>Add New Store</h3>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="store-name">Name *</label>
+          <input type="text" id="store-name" placeholder="Ashdown Classic Chevrolet" required>
+        </div>
+        <div class="form-group">
+          <label for="store-code">Code *</label>
+          <input type="text" id="store-code" placeholder="ASHDOWN" required>
+        </div>
+        <div class="form-group">
+          <label for="store-city">City *</label>
+          <input type="text" id="store-city" placeholder="Ashdown" required>
+        </div>
+        <div class="form-group">
+          <label for="store-state">State *</label>
+          <input type="text" id="store-state" placeholder="AR" maxlength="2" required>
+        </div>
+        <div class="form-group">
+          <label for="store-brand">Brand</label>
+          <input type="text" id="store-brand" placeholder="Chevrolet">
+        </div>
+        <div class="form-group">
+          <label for="store-cadence">Meeting Cadence</label>
+          <select id="store-cadence">
+            <option value="biweekly" selected>Biweekly</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button id="save-store" class="btn btn-primary">Save Store</button>
+        <button id="cancel-store" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Upload Section -->
+  <section class="card" id="upload-section">
+    <h2>2. Upload R&amp;R Reports</h2>
+    <div class="form-group">
+      <label for="meeting-date">Meeting Date</label>
+      <input type="date" id="meeting-date">
+    </div>
+
+    <div id="drop-zone" class="drop-zone">
+      <p class="drop-zone-text">Drag &amp; drop PDF files here</p>
+      <p class="drop-zone-sub">or</p>
+      <label class="btn btn-secondary file-label">
+        Choose Files
+        <input type="file" id="file-input" multiple accept=".pdf" hidden>
+      </label>
+    </div>
+
+    <div id="file-list" class="file-list hidden"></div>
+
+    <button id="process-btn" class="btn btn-primary btn-large" disabled>
+      Process Reports
+    </button>
+  </section>
+
+  <!-- Processing Status -->
+  <section class="card hidden" id="status-section">
+    <div id="spinner" class="spinner-wrap">
+      <div class="spinner"></div>
+      <p>Processing reports...</p>
+    </div>
+
+    <div id="results" class="hidden">
+      <h2>Processing Results</h2>
+      <div class="results-grid">
+        <div class="result-card">
+          <span class="result-number" id="pages-count">0</span>
+          <span class="result-label">Pages Extracted</span>
+        </div>
+        <div class="result-card">
+          <span class="result-number" id="records-count">0</span>
+          <span class="result-label">Records Parsed</span>
+        </div>
+        <div class="result-card result-card-yellow">
+          <span class="result-number" id="yellow-count">0</span>
+          <span class="result-label">Yellow Flags</span>
+        </div>
+        <div class="result-card result-card-red">
+          <span class="result-number" id="red-count">0</span>
+          <span class="result-label">Red Flags</span>
+        </div>
+      </div>
+
+      <div id="records-detail" class="records-detail"></div>
+
+      <div class="download-links">
+        <a id="download-packet" class="btn btn-primary" target="_blank">Download Packet PDF</a>
+        <a id="download-flagged" class="btn btn-secondary" target="_blank">Download Flagged Items PDF</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Error Display -->
+  <div id="error-banner" class="error-banner hidden"></div>
+
+  <!-- Flags Preview -->
+  <section class="card hidden" id="flags-section">
+    <h2>Flagged Items</h2>
+    <div class="flags-filters">
+      <select id="flag-severity-filter">
+        <option value="">All Severities</option>
+        <option value="red">Red Only</option>
+        <option value="yellow">Yellow Only</option>
+      </select>
+      <select id="flag-category-filter">
+        <option value="">All Categories</option>
+        <option value="inventory">Inventory</option>
+        <option value="parts">Parts</option>
+        <option value="financial">Financial</option>
+        <option value="operations">Operations</option>
+      </select>
+    </div>
+    <table id="flags-table" class="flags-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Severity</th>
+          <th>Message</th>
+          <th>Value</th>
+          <th>Threshold</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="flags-tbody"></tbody>
+    </table>
+  </section>
+
+  <!-- Recent Meetings -->
+  <section class="card hidden" id="meetings-section">
+    <h2>Recent Meetings</h2>
+    <div id="meetings-list" class="meetings-list"></div>
+  </section>
+</main>
+
+<footer>
+  <p>GOAC Asset Meeting Manager &mdash; Gregg Orr Auto Collection</p>
+</footer>
+
+<script>
+(function() {
+  'use strict';
+
+  const API = '/api/v1';
+  let selectedStoreId = null;
+  let currentMeetingId = null;
+  let selectedFiles = [];
+
+  // --- DOM refs ---
+  const storeSelect = document.getElementById('store-select');
+  const toggleNewStore = document.getElementById('toggle-new-store');
+  const newStoreForm = document.getElementById('new-store-form');
+  const saveStoreBtn = document.getElementById('save-store');
+  const cancelStoreBtn = document.getElementById('cancel-store');
+  const meetingDateInput = document.getElementById('meeting-date');
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const fileList = document.getElementById('file-list');
+  const processBtn = document.getElementById('process-btn');
+  const statusSection = document.getElementById('status-section');
+  const spinner = document.getElementById('spinner');
+  const results = document.getElementById('results');
+  const errorBanner = document.getElementById('error-banner');
+  const flagsSection = document.getElementById('flags-section');
+  const flagsTbody = document.getElementById('flags-tbody');
+  const meetingsSection = document.getElementById('meetings-section');
+  const meetingsList = document.getElementById('meetings-list');
+  const severityFilter = document.getElementById('flag-severity-filter');
+  const categoryFilter = document.getElementById('flag-category-filter');
+
+  // --- Init ---
+  function init() {
+    meetingDateInput.value = new Date().toISOString().split('T')[0];
+    loadStores();
+    bindEvents();
+  }
+
+  function bindEvents() {
+    storeSelect.addEventListener('change', onStoreChange);
+    toggleNewStore.addEventListener('click', () => {
+      newStoreForm.classList.toggle('hidden');
+    });
+    cancelStoreBtn.addEventListener('click', () => {
+      newStoreForm.classList.add('hidden');
+      clearNewStoreForm();
+    });
+    saveStoreBtn.addEventListener('click', onSaveStore);
+
+    // Drag and drop
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drop-zone-active');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('drop-zone-active');
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drop-zone-active');
+      const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      if (files.length === 0) {
+        showError('Only PDF files are accepted.');
+        return;
+      }
+      addFiles(files);
+    });
+
+    fileInput.addEventListener('change', () => {
+      addFiles(Array.from(fileInput.files));
+      fileInput.value = '';
+    });
+
+    processBtn.addEventListener('click', onProcess);
+    severityFilter.addEventListener('change', () => loadFlags(currentMeetingId));
+    categoryFilter.addEventListener('change', () => loadFlags(currentMeetingId));
+  }
+
+  // --- Stores ---
+  async function loadStores() {
+    try {
+      const res = await fetch(API + '/stores');
+      if (!res.ok) throw new Error('Failed to load stores');
+      const stores = await res.json();
+      storeSelect.innerHTML = '<option value="">-- Select a store --</option>';
+      stores.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name + ' (' + s.code + ')';
+        storeSelect.appendChild(opt);
+      });
+      if (selectedStoreId) {
+        storeSelect.value = selectedStoreId;
+      }
+    } catch (e) {
+      showError('Could not load stores: ' + e.message);
+    }
+  }
+
+  function onStoreChange() {
+    selectedStoreId = storeSelect.value || null;
+    updateProcessBtn();
+    if (selectedStoreId) {
+      loadStoreMeetings(selectedStoreId);
+    } else {
+      meetingsSection.classList.add('hidden');
+    }
+  }
+
+  async function onSaveStore() {
+    const name = document.getElementById('store-name').value.trim();
+    const code = document.getElementById('store-code').value.trim();
+    const city = document.getElementById('store-city').value.trim();
+    const state = document.getElementById('store-state').value.trim().toUpperCase();
+    const brand = document.getElementById('store-brand').value.trim() || null;
+    const cadence = document.getElementById('store-cadence').value;
+
+    if (!name || !code || !city || !state) {
+      showError('Name, code, city, and state are required.');
+      return;
+    }
+    if (state.length !== 2) {
+      showError('State must be a 2-letter abbreviation.');
+      return;
+    }
+
+    saveStoreBtn.disabled = true;
+    saveStoreBtn.textContent = 'Saving...';
+
+    try {
+      const res = await fetch(API + '/stores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name,
+          code: code,
+          city: city,
+          state: state,
+          brand: brand,
+          meeting_cadence: cadence,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to create store');
+      }
+
+      const store = await res.json();
+      selectedStoreId = store.id;
+      newStoreForm.classList.add('hidden');
+      clearNewStoreForm();
+      await loadStores();
+      storeSelect.value = selectedStoreId;
+      onStoreChange();
+      hideError();
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      saveStoreBtn.disabled = false;
+      saveStoreBtn.textContent = 'Save Store';
+    }
+  }
+
+  function clearNewStoreForm() {
+    document.getElementById('store-name').value = '';
+    document.getElementById('store-code').value = '';
+    document.getElementById('store-city').value = '';
+    document.getElementById('store-state').value = '';
+    document.getElementById('store-brand').value = '';
+    document.getElementById('store-cadence').value = 'biweekly';
+  }
+
+  // --- File handling ---
+  function addFiles(files) {
+    files.forEach(f => {
+      if (!selectedFiles.some(sf => sf.name === f.name && sf.size === f.size)) {
+        selectedFiles.push(f);
+      }
+    });
+    renderFileList();
+    updateProcessBtn();
+  }
+
+  function removeFile(index) {
+    selectedFiles.splice(index, 1);
+    renderFileList();
+    updateProcessBtn();
+  }
+
+  function renderFileList() {
+    if (selectedFiles.length === 0) {
+      fileList.classList.add('hidden');
+      return;
+    }
+    fileList.classList.remove('hidden');
+    fileList.innerHTML = selectedFiles.map((f, i) =>
+      '<div class="file-item">' +
+        '<span class="file-name">' + escapeHtml(f.name) + '</span>' +
+        '<span class="file-size">' + formatSize(f.size) + '</span>' +
+        '<button class="file-remove" data-index="' + i + '">&times;</button>' +
+      '</div>'
+    ).join('');
+
+    fileList.querySelectorAll('.file-remove').forEach(btn => {
+      btn.addEventListener('click', () => removeFile(parseInt(btn.dataset.index)));
+    });
+  }
+
+  function updateProcessBtn() {
+    processBtn.disabled = !selectedStoreId || selectedFiles.length === 0;
+  }
+
+  // --- Upload & Process ---
+  async function onProcess() {
+    if (!selectedStoreId || selectedFiles.length === 0) return;
+
+    hideError();
+    statusSection.classList.remove('hidden');
+    spinner.classList.remove('hidden');
+    results.classList.add('hidden');
+    flagsSection.classList.add('hidden');
+    processBtn.disabled = true;
+    processBtn.textContent = 'Processing...';
+
+    const formData = new FormData();
+    formData.append('store_id', selectedStoreId);
+    formData.append('meeting_date', meetingDateInput.value);
+    selectedFiles.forEach(f => formData.append('files', f));
+
+    try {
+      const endpoint = selectedFiles.length === 1 ? '/upload' : '/upload/bulk';
+      // Single file uses 'file' param, bulk uses 'files'
+      if (selectedFiles.length === 1) {
+        const singleForm = new FormData();
+        singleForm.append('store_id', selectedStoreId);
+        singleForm.append('meeting_date', meetingDateInput.value);
+        singleForm.append('file', selectedFiles[0]);
+        var res = await fetch(API + '/upload', { method: 'POST', body: singleForm });
+      } else {
+        var res = await fetch(API + '/upload/bulk', { method: 'POST', body: formData });
+      }
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Upload failed');
+      }
+
+      const data = await res.json();
+      currentMeetingId = data.meeting_id;
+      showResults(data);
+      loadFlags(currentMeetingId);
+      loadStoreMeetings(selectedStoreId);
+
+      // Clear files
+      selectedFiles = [];
+      renderFileList();
+
+      // Scroll to results
+      statusSection.scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+      showError('Processing failed: ' + e.message);
+      statusSection.classList.add('hidden');
+    } finally {
+      processBtn.disabled = false;
+      processBtn.textContent = 'Process Reports';
+      updateProcessBtn();
+    }
+  }
+
+  function showResults(data) {
+    spinner.classList.add('hidden');
+    results.classList.remove('hidden');
+
+    const pagesExtracted = data.pages_extracted || data.total_pages_extracted || 0;
+    document.getElementById('pages-count').textContent = pagesExtracted;
+
+    const records = data.records_parsed || {};
+    const totalRecords = Object.values(records).reduce((a, b) => a + b, 0);
+    document.getElementById('records-count').textContent = totalRecords;
+
+    const flags = data.flags_generated || {};
+    document.getElementById('yellow-count').textContent = flags.yellow || 0;
+    document.getElementById('red-count').textContent = flags.red || 0;
+
+    // Records detail
+    const detailEl = document.getElementById('records-detail');
+    if (Object.keys(records).length > 0) {
+      detailEl.innerHTML = '<h3>Records by Category</h3><ul>' +
+        Object.entries(records).map(([k, v]) =>
+          '<li><strong>' + formatModelName(k) + ':</strong> ' + v + '</li>'
+        ).join('') + '</ul>';
+    } else {
+      detailEl.innerHTML = '';
+    }
+
+    // Download links
+    const packetLink = document.getElementById('download-packet');
+    const flaggedLink = document.getElementById('download-flagged');
+    packetLink.href = API + '/packets/' + currentMeetingId;
+    flaggedLink.href = API + '/packets/' + currentMeetingId + '/flagged-items';
+  }
+
+  // --- Flags ---
+  async function loadFlags(meetingId) {
+    if (!meetingId) return;
+
+    let url = API + '/flags/' + meetingId;
+    const params = [];
+    const sev = severityFilter.value;
+    const cat = categoryFilter.value;
+    if (sev) params.push('severity=' + sev);
+    if (cat) params.push('category=' + cat);
+    if (params.length) url += '?' + params.join('&');
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to load flags');
+      const flags = await res.json();
+      renderFlags(flags);
+      flagsSection.classList.remove('hidden');
+    } catch (e) {
+      console.error('Failed to load flags:', e);
+    }
+  }
+
+  function renderFlags(flags) {
+    if (flags.length === 0) {
+      flagsTbody.innerHTML = '<tr><td colspan="6" class="no-data">No flags found</td></tr>';
+      return;
+    }
+
+    flagsTbody.innerHTML = flags.map(f =>
+      '<tr class="flag-row flag-' + f.severity + '">' +
+        '<td>' + capitalize(f.category) + '</td>' +
+        '<td><span class="severity-badge severity-' + f.severity + '">' + f.severity.toUpperCase() + '</span></td>' +
+        '<td>' + escapeHtml(f.message) + '</td>' +
+        '<td>' + (f.field_value || '-') + '</td>' +
+        '<td>' + (f.threshold || '-') + '</td>' +
+        '<td><span class="status-badge status-' + f.status + '">' + capitalize(f.status) + '</span></td>' +
+      '</tr>'
+    ).join('');
+  }
+
+  // --- Recent Meetings ---
+  async function loadStoreMeetings(storeId) {
+    try {
+      const res = await fetch(API + '/stores/' + storeId + '/meetings?limit=10');
+      if (!res.ok) throw new Error('Failed to load meetings');
+      const meetings = await res.json();
+      renderMeetings(meetings);
+    } catch (e) {
+      console.error('Failed to load meetings:', e);
+    }
+  }
+
+  function renderMeetings(meetings) {
+    if (meetings.length === 0) {
+      meetingsSection.classList.add('hidden');
+      return;
+    }
+
+    meetingsSection.classList.remove('hidden');
+    meetingsList.innerHTML = meetings.map(m =>
+      '<div class="meeting-item">' +
+        '<div class="meeting-info">' +
+          '<span class="meeting-date">' + m.meeting_date + '</span>' +
+          '<span class="status-badge status-' + m.status + '">' + capitalize(m.status) + '</span>' +
+        '</div>' +
+        '<div class="meeting-actions">' +
+          (m.packet_url
+            ? '<a href="' + API + '/packets/' + m.id + '" class="btn btn-small" target="_blank">Packet</a>'
+            : '') +
+          (m.flagged_items_url
+            ? '<a href="' + API + '/packets/' + m.id + '/flagged-items" class="btn btn-small btn-secondary" target="_blank">Flags</a>'
+            : '') +
+          '<button class="btn btn-small btn-secondary" onclick="window._viewMeeting(\'' + m.id + '\')">View</button>' +
+        '</div>' +
+      '</div>'
+    ).join('');
+  }
+
+  // Expose for onclick handler
+  window._viewMeeting = function(meetingId) {
+    currentMeetingId = meetingId;
+    loadFlags(meetingId);
+    flagsSection.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // --- Error handling ---
+  function showError(msg) {
+    errorBanner.textContent = msg;
+    errorBanner.classList.remove('hidden');
+    setTimeout(() => { errorBanner.classList.add('hidden'); }, 8000);
+  }
+
+  function hideError() {
+    errorBanner.classList.add('hidden');
+  }
+
+  // --- Helpers ---
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  function formatModelName(name) {
+    return name.replace(/([A-Z])/g, ' $1').trim();
+  }
+
+  // --- Boot ---
+  init();
+})();
+</script>
+</body>
+</html>
