@@ -396,6 +396,41 @@ export function autoAssignMeetingFlags(
   });
 }
 
+// --- Notifications ---
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  reference_id: string | null;
+  is_read: boolean;
+  created_at: string | null;
+}
+
+export function fetchNotifications(
+  token?: string,
+  unreadOnly?: boolean,
+  limit?: number,
+): Promise<NotificationItem[]> {
+  const params = new URLSearchParams();
+  if (unreadOnly) params.set("unread_only", "true");
+  if (limit) params.set("limit", String(limit));
+  const qs = params.toString();
+  return apiFetch(`/notifications${qs ? `?${qs}` : ""}`, { token });
+}
+
+export function fetchUnreadCount(token?: string): Promise<{ unread_count: number }> {
+  return apiFetch("/notifications/unread-count", { token });
+}
+
+export function markNotificationRead(notificationId: string, token?: string): Promise<{ id: string; is_read: boolean }> {
+  return apiFetch(`/notifications/${notificationId}/read`, { method: "PATCH", token });
+}
+
+export function markAllNotificationsRead(token?: string): Promise<{ status: string }> {
+  return apiFetch("/notifications/read-all", { method: "POST", token });
+}
+
 // --- Auth ---
 export interface AuthCallbackResponse {
   access_token: string;

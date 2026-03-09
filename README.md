@@ -172,6 +172,39 @@ The flagging engine (`app/flagging/`) evaluates parsed meeting data against conf
 
 Comparison types: `gt` (greater than), `lt` (less than — lower is worse), `gte` (greater or equal), `any_gt` (any amount > 0), `abs_gt` (absolute value exceeds threshold).
 
+## Email Notifications (SendGrid)
+
+The system sends transactional emails for accountability events:
+
+| Email Type | Trigger | Recipients |
+|-----------|---------|------------|
+| Flag Assigned | Auto-assign or manual assign | Assigned manager |
+| Deadline Reminder | 6 hours before deadline (hourly check) | Assigned manager |
+| Overdue Notice | Daily at 7 AM CT | Assigned manager |
+| Escalation | Daily at 7 AM CT (when overdue flags exist) | Corporate users |
+| Response Received | Manager submits flag response | Corporate users |
+| Packet Ready | Meeting packet generated | Store GM |
+| Daily Digest | 7:30 AM CT Mon-Fri | Corporate users |
+
+### SendGrid DNS Setup
+
+To enable email delivery, configure these DNS records on your sending domain:
+
+1. **SPF**: Add `include:sendgrid.net` to your domain's SPF record
+2. **DKIM**: Add the two CNAME records from SendGrid's Sender Authentication dashboard
+3. **DMARC**: Add a DMARC policy record (e.g., `v=DMARC1; p=none;`)
+
+### Environment Variables
+
+```bash
+SENDGRID_API_KEY=SG.your_api_key_here    # Required for sending; emails logged when empty
+NOTIFICATION_ENABLED=true                  # Master switch for all notifications
+```
+
+### Graceful Degradation
+
+When `SENDGRID_API_KEY` is not set, the email service logs all emails that *would* have been sent and returns success. This enables local development and testing without a SendGrid account. Email failures never crash the processing pipeline.
+
 ## API Endpoints
 
 All routes are prefixed with `/api/v1`. Health check is at root `/health`.
@@ -220,6 +253,14 @@ All routes are prefixed with `/api/v1`. Health check is at root `/health`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/dashboard` | Aggregated multi-store overview with flag stats |
+
+### Notifications (Phase 2)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/notifications` | Get current user's notifications (supports `unread_only`, `limit`) |
+| PATCH | `/api/v1/notifications/{notification_id}/read` | Mark a notification as read |
+| POST | `/api/v1/notifications/read-all` | Mark all notifications as read |
+| GET | `/api/v1/notifications/unread-count` | Get unread notification count (for navbar badge) |
 
 ## Phase 1 Deliverables
 
@@ -297,4 +338,4 @@ cd backend && python3 -m pytest tests/ -v
 
 **Phase 1 COMPLETE.** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).
 
-**Phase 2 IN PROGRESS.** Auth system (Google OAuth + JWT), 5 new accountability models, corporate dashboard endpoint, Next.js frontend with NextAuth. 21 API endpoints. 269 unit tests passing.
+**Phase 2 IN PROGRESS.** Auth system (Google OAuth + JWT), 5 accountability models, corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 407 tests passing.

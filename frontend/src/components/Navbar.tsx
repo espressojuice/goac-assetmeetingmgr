@@ -3,6 +3,7 @@
 import { useSession, signIn, signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NotificationBell } from "./NotificationBell";
 
 function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
   const pathname = usePathname();
@@ -39,6 +40,7 @@ export function Navbar() {
       <div className="flex items-center gap-4">
         {status === "authenticated" && session?.user ? (
           <>
+            <NotificationBell />
             {role && (
               <span className="text-xs text-gray-400 uppercase">{role}</span>
             )}

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: Optional[str] = None
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Email (SendGrid)
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM_EMAIL: str = "notifications@goac-assetmeetingmgr.com"
+    SENDGRID_FROM_NAME: str = "GOAC Asset Meeting Manager"
+    NOTIFICATION_REMINDER_HOURS: int = 6
+    NOTIFICATION_ENABLED: bool = True
+
     model_config = {"env_file": ".env"}
 
 

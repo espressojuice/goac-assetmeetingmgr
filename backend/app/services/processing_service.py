@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.flag import FlagSeverity
 from app.models.meeting import Meeting, MeetingStatus
+from app.models.store import Store
 from app.models.inventory import (
     FloorplanReconciliation,
     NewVehicleInventory,
@@ -44,6 +45,7 @@ from app.generators.packet_generator import StandardizedPacketGenerator
 from app.generators.flagged_items_report import FlaggedItemsReportGenerator
 from app.parsers.pdf_extractor import PDFExtractor
 from app.parsers.router import ParserRouter
+from app.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 
@@ -199,13 +201,37 @@ class ProcessingService:
 
         await db.commit()
 
+        red_count = sum(1 for f in flags if f.severity == FlagSeverity.RED)
+        yellow_count = sum(1 for f in flags if f.severity == FlagSeverity.YELLOW)
+
+        # Notify store users that packet is ready
+        try:
+            from app.models.user import User
+            email_svc = EmailService()
+            store_result = await db.execute(
+                select(Store).where(Store.id == store_uuid)
+            )
+            store_obj = store_result.scalar_one_or_none()
+            if store_obj and store_obj.gm_email:
+                user_result = await db.execute(
+                    select(User).where(User.email == store_obj.gm_email)
+                )
+                gm_user = user_result.scalar_one_or_none()
+                if gm_user and meeting:
+                    await email_svc.send_meeting_packet_ready(
+                        [gm_user], meeting, store_obj,
+                        red_count=red_count, yellow_count=yellow_count,
+                    )
+        except Exception:
+            logger.warning("Failed to send packet ready notification", exc_info=True)
+
         result_dict = {
             "pages_extracted": len(pages),
             "records_parsed": record_counts,
             "unhandled_pages": unhandled_pages,
             "flags_generated": {
-                "yellow": sum(1 for f in flags if f.severity == FlagSeverity.YELLOW),
-                "red": sum(1 for f in flags if f.severity == FlagSeverity.RED),
+                "yellow": yellow_count,
+                "red": red_count,
                 "total": len(flags),
             },
             "packet_path": packet_path,

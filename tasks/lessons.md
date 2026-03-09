@@ -30,3 +30,6 @@
 - **2026-03-09**: When adding new SQLAlchemy models with relationships to existing models, ensure the string-referenced class name in `Mapped[List["ClassName"]]` matches the actual class name exactly (e.g., `FlagResponseRecord` not `FlagResponse`).
 - **2026-03-09**: 10-character minimum on flag responses prevents cop-out answers. Corporate wanted accountability, not checkboxes.
 - **2026-03-09**: Recurring flag detection compares by category + field_name + field_value (stock_number, ro_number, etc.) — not just by message text, which can change slightly between meetings.
+- **2026-03-09**: SendGrid deliverability requires SPF, DKIM, and DMARC DNS records. Also need custom FROM domain — sending from a generic domain gets flagged. Bryan needs to configure: 1) SPF include:sendgrid.net on his domain, 2) Two CNAME records for DKIM from SendGrid dashboard, 3) DMARC policy record.
+- **2026-03-09**: Email service must be gracefully disabled when API key isn't configured — this is critical for local development and testing. Never let email failures crash the processing pipeline.
+- **2026-03-09**: APScheduler with AsyncIOScheduler integrates cleanly with FastAPI — runs in the same event loop. Use US/Central timezone for all scheduled jobs.

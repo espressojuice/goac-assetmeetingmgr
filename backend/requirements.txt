@@ -15,3 +15,5 @@ asyncpg
 authlib
 python-jose[cryptography]
 bcrypt
+sendgrid
+apscheduler

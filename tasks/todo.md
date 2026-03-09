@@ -87,10 +87,10 @@
 - [x] Build flag response workflow (assignment + response form)
 - [x] Implement repeat flag detection and auto-escalation
 - [x] Build manager response page
-- [ ] Build email notification service (SendGrid)
-- [ ] Implement automated reminders (24h deadline, overdue)
+- [x] Build email notification service (SendGrid)
+- [x] Implement automated reminders (24h deadline, overdue)
 - [ ] Add role-based access control to all routes
-- [ ] Build notification center (in-app)
+- [x] Build notification center (in-app)
 
 ## Session Log
 
@@ -142,3 +142,15 @@
 - Frontend: updated Navbar with Dashboard + My Flags navigation links
 - Frontend: api.ts updated with fetchMyFlags, assignFlag, respondToFlag, escalateFlag, autoAssignMeetingFlags
 - 22 new tests (auto-assign, manual assign, response, my flags, overdue, escalation, recurring detection)
+
+### Session 11 — 2026-03-09 (Email Notifications + In-App Notification Center)
+- Built EmailService (SendGrid v3 API via httpx): 7 email methods (flag_assigned, reminder_approaching, overdue_to_manager, overdue_to_corporate, response_received, meeting_packet_ready, daily_digest)
+- Professional HTML email templates with GOAC branding (#003366), inline CSS, mobile-responsive, plain text fallback
+- Graceful degradation: disabled when SENDGRID_API_KEY not set, never crashes pipeline on email failure
+- Built NotificationScheduler: 3 scheduled jobs (reminder_check hourly, overdue_check daily 7AM CT, daily_digest 7:30AM CT Mon-Fri)
+- APScheduler AsyncIOScheduler integration with FastAPI startup event
+- 4 new notification API endpoints: GET /notifications, PATCH /notifications/{id}/read, POST /notifications/read-all, GET /notifications/unread-count
+- Wired email notifications into FlagService (auto_assign → send_flag_assigned, submit_response → send_response_received) and ProcessingService (process_upload → send_meeting_packet_ready)
+- Frontend: NotificationBell component in Navbar — bell icon with unread count badge, dropdown with recent notifications, mark read/mark all read, 60s polling, click-to-navigate
+- 5 new config settings: SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME, NOTIFICATION_REMINDER_HOURS, NOTIFICATION_ENABLED
+- 34 new tests (15 email service, 10 scheduler, 9 notification API), 407 total all passing

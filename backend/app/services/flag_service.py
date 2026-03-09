@@ -22,6 +22,8 @@ from app.models.accountability import (
     NotificationType,
 )
 
+from app.services.email_service import EmailService
+
 logger = logging.getLogger(__name__)
 
 # Maps flag category to the user role that should handle it.
@@ -137,6 +139,16 @@ class FlagService:
                 unassigned_count += 1
 
         await db.flush()
+
+        # Send email notifications for new assignments
+        if assigned_count > 0 and gm_user:
+            try:
+                email_svc = EmailService()
+                for flag in unassigned_flags:
+                    if gm_user and assigner_id:
+                        await email_svc.send_flag_assigned(gm_user, flag, meeting, store)
+            except Exception:
+                logger.warning("Failed to send flag assignment emails", exc_info=True)
 
         return {
             "assigned_count": assigned_count,
@@ -276,6 +288,28 @@ class FlagService:
         db.add(record)
 
         await db.flush()
+
+        # Notify corporate users of the response
+        try:
+            email_svc = EmailService()
+            store = (await db.execute(
+                select(Store).where(Store.id == flag.store_id)
+            )).scalar_one_or_none()
+            if store:
+                corporate_result = await db.execute(
+                    select(User).where(
+                        and_(User.role == UserRole.CORPORATE, User.is_active == True)  # noqa: E712
+                    )
+                )
+                corporate_users = list(corporate_result.scalars().all())
+                if corporate_users:
+                    record.user = user  # Attach user for email template
+                    await email_svc.send_response_received(
+                        corporate_users, flag, record, store
+                    )
+        except Exception:
+            logger.warning("Failed to send response notification emails", exc_info=True)
+
         return record
 
     # ------------------------------------------------------------------

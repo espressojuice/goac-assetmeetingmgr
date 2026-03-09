@@ -11,6 +11,7 @@ from app.api.routes.stores import router as stores_router
 from app.api.routes.meetings import router as meetings_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.notifications import router as notifications_router
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -30,6 +31,18 @@ app.include_router(stores_router, prefix="/api/v1", tags=["stores"])
 app.include_router(meetings_router, prefix="/api/v1", tags=["meetings"])
 app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
+app.include_router(notifications_router, prefix="/api/v1", tags=["notifications"])
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the notification scheduler on app startup."""
+    try:
+        from app.scheduler import start_scheduler
+        start_scheduler()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("Failed to start notification scheduler", exc_info=True)
 
 
 @app.get("/health")
