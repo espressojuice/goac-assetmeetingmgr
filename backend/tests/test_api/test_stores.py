@@ -45,24 +45,73 @@ class TestListStores:
 
 
 @pytest.mark.asyncio
-class TestGetStore:
+class TestGetStoreDetail:
 
-    async def test_get_store(self, client, sample_store):
-        """Get store details by ID."""
+    async def test_get_store_returns_rich_detail(self, client, sample_store):
+        """Get store returns rich detail with store, stats, meetings, users."""
         response = await client.get(f"{STORES_URL}/{STORE_ID}")
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "Ashdown Classic Chevrolet"
-        assert data["code"] == "ASHDOWN"
+        # Top-level keys
+        assert "store" in data
+        assert "stats" in data
         assert "recent_meetings" in data
+        assert "users" in data
 
-    async def test_get_store_with_meetings(self, client, sample_store, sample_meeting):
-        """Get store includes recent meetings."""
+    async def test_get_store_info_shape(self, client, sample_store):
+        """Store info has expected fields."""
         response = await client.get(f"{STORES_URL}/{STORE_ID}")
-        assert response.status_code == 200
+        store = response.json()["store"]
+        assert store["name"] == "Ashdown Classic Chevrolet"
+        assert store["code"] == "ASHDOWN"
+        assert store["brand"] == "Chevrolet"
+        assert store["city"] == "Ashdown"
+        assert store["state"] == "AR"
+        assert store["gm_name"] == "John Doe"
+        assert store["is_active"] is True
+
+    async def test_get_store_stats_no_meetings(self, client, sample_store):
+        """Stats are zeroed when no meetings exist."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}")
+        stats = response.json()["stats"]
+        assert stats["total_meetings"] == 0
+        assert stats["total_flags_all_time"] == 0
+        assert stats["current_open_flags"] == 0
+        assert stats["response_rate"] == 0.0
+        assert stats["avg_flags_per_meeting"] == 0.0
+        assert stats["most_common_flag_category"] is None
+
+    async def test_get_store_stats_with_flags(self, client, sample_store, sample_meeting, sample_flags):
+        """Stats reflect actual flag data."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}")
+        stats = response.json()["stats"]
+        assert stats["total_meetings"] == 1
+        assert stats["total_flags_all_time"] == 4
+        assert stats["current_open_flags"] == 3  # 3 OPEN, 1 RESPONDED
+        assert stats["response_rate"] == 25.0  # 1/4 = 25%
+        assert stats["avg_flags_per_meeting"] == 4.0
+
+    async def test_get_store_recent_meetings_with_flags(self, client, sample_store, sample_meeting, sample_flags):
+        """Recent meetings include per-meeting flag summaries."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}")
+        meetings = response.json()["recent_meetings"]
+        assert len(meetings) == 1
+        m = meetings[0]
+        assert m["meeting_date"] == "2026-02-11"
+        assert m["status"] == "completed"
+        assert m["flags"]["total"] == 4
+        assert m["flags"]["red"] == 2
+        assert m["flags"]["yellow"] == 2
+        assert m["flags"]["open"] == 3
+        assert m["flags"]["responded"] == 1
+        assert m["response_rate"] == 25.0
+
+    async def test_get_store_empty_meetings(self, client, sample_store):
+        """Store with no meetings returns empty arrays."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}")
         data = response.json()
-        assert len(data["recent_meetings"]) == 1
-        assert data["recent_meetings"][0]["status"] == "completed"
+        assert data["recent_meetings"] == []
+        assert data["users"] == []
 
     async def test_get_store_not_found(self, client):
         """Nonexistent store returns 404."""
@@ -73,6 +122,45 @@ class TestGetStore:
         """Invalid UUID returns 422."""
         response = await client.get(f"{STORES_URL}/not-a-uuid")
         assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+class TestGetStoreFlagTrends:
+
+    async def test_flag_trends_structure(self, client, sample_store, sample_meeting, sample_flags):
+        """Flag trends returns correct structure."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}/flag-trends")
+        assert response.status_code == 200
+        data = response.json()
+        assert "meetings" in data
+        assert len(data["meetings"]) == 1
+        m = data["meetings"][0]
+        assert "date" in m
+        assert "red" in m
+        assert "yellow" in m
+        assert "responded" in m
+        assert "response_rate" in m
+
+    async def test_flag_trends_values(self, client, sample_store, sample_meeting, sample_flags):
+        """Flag trends reflect actual data."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}/flag-trends")
+        m = response.json()["meetings"][0]
+        assert m["date"] == "2026-02-11"
+        assert m["red"] == 2
+        assert m["yellow"] == 2
+        assert m["responded"] == 1
+        assert m["response_rate"] == 25.0
+
+    async def test_flag_trends_empty(self, client, sample_store):
+        """No completed meetings returns empty list."""
+        response = await client.get(f"{STORES_URL}/{STORE_ID}/flag-trends")
+        assert response.status_code == 200
+        assert response.json()["meetings"] == []
+
+    async def test_flag_trends_not_found(self, client):
+        """Nonexistent store returns 404."""
+        response = await client.get(f"{STORES_URL}/{FAKE_STORE}/flag-trends")
+        assert response.status_code == 404
 
 
 @pytest.mark.asyncio

@@ -1,18 +1,25 @@
 """Meeting routes."""
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import MeetingResponse, MeetingDataResponse
+from app.api.schemas import (
+    MeetingDetailResponse,
+    MeetingDataResponse,
+    MeetingFlagDetailResponse,
+)
 from app.database import get_db
 from app.models.meeting import Meeting
+from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
 from app.models.inventory import NewVehicleInventory, UsedVehicleInventory, ServiceLoaner, FloorplanReconciliation
 from app.models.parts import PartsInventory, PartsAnalysis
 from app.models.financial import Receivable, FIChargeback, ContractInTransit, Prepaid, PolicyAdjustment
 from app.models.operations import OpenRepairOrder, WarrantyClaim, MissingTitle, SlowToAccounting
+from app.services.meeting_service import get_meeting_detail, get_meeting_flags
 
 router = APIRouter()
 
@@ -43,6 +50,14 @@ _CATEGORY_MODELS = {
     },
 }
 
+# Maps category+field_name to the model's identifying field for flag association
+_FLAG_CATEGORY_MAP = {
+    "inventory": ["new_vehicles", "used_vehicles", "service_loaners", "floorplan_reconciliation"],
+    "parts": ["parts_inventory", "parts_analysis"],
+    "financial": ["receivables", "fi_chargebacks", "contracts_in_transit", "prepaids", "policy_adjustments"],
+    "operations": ["open_repair_orders", "warranty_claims", "missing_titles", "slow_to_accounting"],
+}
+
 
 def _serialize_record(record) -> dict:
     """Convert a SQLAlchemy model instance to a dict, handling special types."""
@@ -65,32 +80,34 @@ def _serialize_record(record) -> dict:
     return result
 
 
-@router.get("/meetings/{meeting_id}", response_model=MeetingResponse)
-async def get_meeting(
-    meeting_id: str, db: AsyncSession = Depends(get_db)
-) -> MeetingResponse:
-    """Get full meeting details."""
+async def _validate_meeting(meeting_id: str, db: AsyncSession) -> uuid.UUID:
+    """Validate and return meeting UUID, raising HTTPException on errors."""
     try:
         meeting_uuid = uuid.UUID(meeting_id)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid meeting_id format")
 
     result = await db.execute(select(Meeting).where(Meeting.id == meeting_uuid))
-    meeting = result.scalar_one_or_none()
-    if not meeting:
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+    return meeting_uuid
+
+
+@router.get("/meetings/{meeting_id}", response_model=MeetingDetailResponse)
+async def get_meeting(
+    meeting_id: str, db: AsyncSession = Depends(get_db)
+) -> MeetingDetailResponse:
+    """Get comprehensive meeting details with executive summary and flag stats."""
+    try:
+        meeting_uuid = uuid.UUID(meeting_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid meeting_id format")
+
+    detail = await get_meeting_detail(meeting_uuid, db)
+    if not detail:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
 
-    return MeetingResponse(
-        id=meeting.id,
-        store_id=meeting.store_id,
-        meeting_date=meeting.meeting_date,
-        status=meeting.status.value,
-        packet_url=meeting.packet_url,
-        flagged_items_url=meeting.flagged_items_url,
-        packet_generated_at=meeting.packet_generated_at,
-        notes=meeting.notes,
-        created_at=meeting.created_at,
-    )
+    return detail
 
 
 @router.get("/meetings/{meeting_id}/data/{category}", response_model=MeetingDataResponse)
@@ -99,8 +116,8 @@ async def get_meeting_data(
     category: str,
     db: AsyncSession = Depends(get_db),
 ) -> MeetingDataResponse:
-    """
-    Get parsed data for a specific category.
+    """Get parsed data for a specific category with associated flags.
+
     Categories: inventory, parts, financial, operations.
     """
     if category not in _CATEGORY_MODELS:
@@ -109,15 +126,27 @@ async def get_meeting_data(
             detail=f"Invalid category: {category}. Must be one of: {', '.join(_CATEGORY_MODELS.keys())}",
         )
 
-    try:
-        meeting_uuid = uuid.UUID(meeting_id)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid meeting_id format")
+    meeting_uuid = await _validate_meeting(meeting_id, db)
 
-    # Verify meeting exists
-    meeting_result = await db.execute(select(Meeting).where(Meeting.id == meeting_uuid))
-    if not meeting_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+    # Load flags for this meeting+category to attach to records
+    flag_result = await db.execute(
+        select(Flag)
+        .where(Flag.meeting_id == meeting_uuid)
+        .where(Flag.category == FlagCategory(category))
+    )
+    flags = list(flag_result.scalars().all())
+
+    # Index flags by field_value for matching to records
+    flags_by_value: dict[str, dict] = {}
+    for f in flags:
+        if f.field_value:
+            key = f.field_value.strip()
+            flags_by_value[key] = {
+                "severity": f.severity.value,
+                "status": f.status.value,
+                "message": f.message,
+                "field_name": f.field_name,
+            }
 
     data = {}
     for key, model in _CATEGORY_MODELS[category].items():
@@ -125,10 +154,71 @@ async def get_meeting_data(
             select(model).where(model.meeting_id == meeting_uuid)
         )
         records = list(result.scalars().all())
-        data[key] = [_serialize_record(r) for r in records]
+        serialized = []
+        for r in records:
+            rec = _serialize_record(r)
+            # Try to attach flag info based on common identifying fields
+            rec["flag"] = None
+            for id_field in ["stock_number", "ro_number", "deal_number", "claim_number",
+                             "account_number", "gl_account", "schedule_number"]:
+                if id_field in rec and rec[id_field]:
+                    # Check if any flag references this record's value
+                    for fv, flag_info in flags_by_value.items():
+                        if str(rec[id_field]) in fv or fv in str(rec.get(flag_info.get("field_name", ""), "")):
+                            rec["flag"] = flag_info
+                            break
+                if rec["flag"]:
+                    break
+            # Also check by field_value matching days_in_stock, days_open, etc.
+            if not rec["flag"]:
+                for fv, flag_info in flags_by_value.items():
+                    fname = flag_info.get("field_name", "")
+                    if fname in rec and str(rec.get(fname)) == fv:
+                        rec["flag"] = flag_info
+                        break
+            serialized.append(rec)
+        data[key] = serialized
 
     return MeetingDataResponse(
         meeting_id=meeting_id,
         category=category,
         data=data,
     )
+
+
+@router.get("/meetings/{meeting_id}/flags", response_model=list[MeetingFlagDetailResponse])
+async def get_meeting_flags_endpoint(
+    meeting_id: str,
+    severity: Optional[str] = None,
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    sort_by: str = "severity",
+    db: AsyncSession = Depends(get_db),
+) -> list[MeetingFlagDetailResponse]:
+    """Get all flags for a meeting with full detail including assignment and response info."""
+    meeting_uuid = await _validate_meeting(meeting_id, db)
+
+    # Validate filter values
+    if severity:
+        try:
+            FlagSeverity(severity)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid severity: {severity}")
+    if category:
+        try:
+            FlagCategory(category)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid category: {category}")
+    if status:
+        try:
+            FlagStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid status: {status}")
+    if sort_by not in ("severity", "category", "created_at", "status"):
+        raise HTTPException(status_code=422, detail=f"Invalid sort_by: {sort_by}")
+
+    flags = await get_meeting_flags(
+        meeting_uuid, db,
+        severity=severity, category=category, status=status, sort_by=sort_by,
+    )
+    return flags

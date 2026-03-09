@@ -82,13 +82,13 @@
 - [x] Set up Google OAuth authentication (backend JWT + NextAuth callback)
 - [x] Initialize Next.js frontend with NextAuth
 - [x] Build corporate dashboard (multi-store overview)
-- [ ] Build store detail page
-- [ ] Build meeting detail page with tabbed data view
-- [ ] Build flag response workflow (assignment + response form)
+- [x] Build store detail page
+- [x] Build meeting detail page with tabbed data view
+- [x] Build flag response workflow (assignment + response form)
+- [x] Implement repeat flag detection and auto-escalation
+- [x] Build manager response page
 - [ ] Build email notification service (SendGrid)
 - [ ] Implement automated reminders (24h deadline, overdue)
-- [ ] Implement repeat flag detection and auto-escalation
-- [ ] Build manager response page
 - [ ] Add role-based access control to all routes
 - [ ] Build notification center (in-app)
 
@@ -108,3 +108,37 @@
 - Components: Navbar, StoreCard, SummaryBar, FlagSummaryChart
 - Docker-compose updated with frontend service + auth env vars
 - 14 new tests (auth + dashboard), 255 unit tests all passing
+
+### Session 8 — 2026-03-09 (Store Detail Page)
+- Built store_service.py: get_store_detail() and get_flag_trends() with efficient batch queries
+- Rich GET /stores/{store_id} returns store info, stats, per-meeting flag summaries, and users
+- New GET /stores/{store_id}/flag-trends endpoint for chart data (last 6 meetings)
+- Frontend store detail page: header with brand badge, 4-stat bar, flag trend chart (recharts ComposedChart), meeting cards with flag summaries and download links, collapsible users table
+- FlagTrendChart component: stacked red/yellow bars + response rate line overlay
+- API client updated with new types (StoreDetail, FlagTrendsData, etc.) and 401→redirect handling
+- 9 new tests (store detail + flag trends), 76 API tests all passing
+
+### Session 9 — 2026-03-09 (Meeting Detail Page)
+- Built meeting_service.py: get_meeting_detail() computes executive summary from parsed data via aggregation queries, get_meeting_flags() returns flags with assignment/response data
+- Updated GET /meetings/{meeting_id} to return MeetingDetailResponse with meeting info, executive summary (14 computed metrics), and flags_summary (with by_category severity breakdown)
+- Updated GET /meetings/{meeting_id}/data/{category} to attach flag info to each record
+- New GET /meetings/{meeting_id}/flags endpoint with severity/category/status/sort_by filters
+- New Pydantic schemas: ExecutiveSummary, FlagsSummary, MeetingInfo, MeetingDetailResponse, MeetingFlagDetailResponse, AssignedToInfo, FlagResponseInfo
+- Frontend: reusable DataTable component (sortable, formatted, row coloring), Tabs component (lazy loading)
+- Frontend: full meeting detail page at /stores/[storeId]/meetings/[meetingId] — breadcrumb, header, executive summary cards, floorplan variance, 4 tabs (Flags/Inventory/Financial/Operations)
+- Frontend: FlagsTab with filter dropdowns, expandable rows, response display; InventoryTab with 4 collapsible sections; FinancialTab with 5 sections (colored aging buckets); OperationsTab with 4 sections
+- Legacy /meetings/[meetingId] redirects to new nested route
+- API client updated with 7 new types + 3 new fetch functions
+- 30 new tests (meeting detail + data + flags), 98 API tests passing, 285 unit tests total
+
+### Session 10 — 2026-03-09 (Flag Response Workflow)
+- Built FlagService with 7 methods: auto_assign_flags, assign_flag, submit_response, get_my_flags, check_overdue_flags, escalate_flag, detect_recurring_flags
+- Added previous_flag_id and escalation_level fields to Flag model for recurring flag tracking
+- 6 new API endpoints: POST /flags/{id}/assign, POST /flags/{id}/respond-workflow, GET /flags/my/assigned, GET /flags/overdue/all, POST /flags/{id}/escalate, POST /meetings/{id}/auto-assign
+- New Pydantic schemas: FlagAssignRequest, FlagRespondWorkflowRequest, FlagEscalateRequest, MyFlagResponse, AutoAssignResponse, OverdueFlagResponse
+- Integrated auto-assign + recurring detection into ProcessingService.process_upload
+- Updated meeting_service to use real escalation_level and deadline-based overdue detection
+- Frontend: My Flags page (/flags) with status filter tabs, FlagCard component, flag detail page (/flags/[flagId]) with ResponseForm
+- Frontend: updated Navbar with Dashboard + My Flags navigation links
+- Frontend: api.ts updated with fetchMyFlags, assignFlag, respondToFlag, escalateFlag, autoAssignMeetingFlags
+- 22 new tests (auto-assign, manual assign, response, my flags, overdue, escalation, recurring detection)

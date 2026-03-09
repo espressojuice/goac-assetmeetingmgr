@@ -3,7 +3,7 @@ import enum
 import uuid
 from typing import Optional
 
-from sqlalchemy import String, Text, DateTime, Enum, ForeignKey, Index, func
+from sqlalchemy import Integer, String, Text, DateTime, Enum, ForeignKey, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -43,6 +43,8 @@ class Flag(Base):
     response_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     responded_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     responded_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    previous_flag_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("flags.id"), nullable=True)
+    escalation_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

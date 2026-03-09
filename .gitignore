@@ -22,6 +22,10 @@ dist/
 # Uploads
 uploads/*
 !uploads/.gitkeep
+backend/uploads/
+
+# Generated output files
+data/samples/*_OUTPUT.pdf
 
 # IDE
 .vscode/

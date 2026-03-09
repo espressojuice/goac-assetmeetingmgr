@@ -39,6 +39,7 @@ from app.models.operations import (
     WarrantyClaim,
 )
 from app.flagging.engine import FlaggingEngine
+from app.services.flag_service import FlagService
 from app.generators.packet_generator import StandardizedPacketGenerator
 from app.generators.flagged_items_report import FlaggedItemsReportGenerator
 from app.parsers.pdf_extractor import PDFExtractor
@@ -86,6 +87,7 @@ class ProcessingService:
         store_id: str,
         meeting_id: str,
         db: AsyncSession,
+        auto_assign: bool = True,
     ) -> dict:
         """
         Full processing pipeline:
@@ -143,6 +145,17 @@ class ProcessingService:
 
         await db.flush()
 
+        # Auto-assign and detect recurring flags
+        assignment_result = None
+        recurring_count = 0
+        if auto_assign:
+            try:
+                flag_svc = FlagService()
+                assignment_result = await flag_svc.auto_assign_flags(str(meeting_uuid), db)
+                recurring_count = await flag_svc.detect_recurring_flags(str(meeting_uuid), db)
+            except Exception:
+                logger.exception("Failed to auto-assign flags or detect recurring")
+
         # Generate packet PDF
         packet_path = None
         flagged_items_path = None
@@ -186,7 +199,7 @@ class ProcessingService:
 
         await db.commit()
 
-        return {
+        result_dict = {
             "pages_extracted": len(pages),
             "records_parsed": record_counts,
             "unhandled_pages": unhandled_pages,
@@ -198,6 +211,11 @@ class ProcessingService:
             "packet_path": packet_path,
             "flagged_items_path": flagged_items_path,
         }
+        if assignment_result:
+            result_dict["auto_assign"] = assignment_result
+            result_dict["recurring_flags"] = recurring_count
+
+        return result_dict
 
     async def process_upload_from_bytes(
         self,

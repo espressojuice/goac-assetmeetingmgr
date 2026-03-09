@@ -15,6 +15,12 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
   }
 
   const res = await fetch(`${API_BASE}/api/v1${path}`, { headers, ...rest });
+  if (res.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    }
+    throw new Error("Unauthorized");
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API ${res.status}: ${text}`);
@@ -58,8 +64,8 @@ export function fetchDashboard(token?: string): Promise<DashboardData> {
   return apiFetch("/dashboard", { token });
 }
 
-// --- Stores ---
-export interface StoreDetail {
+// --- Stores (Rich Detail) ---
+export interface StoreInfo {
   id: string;
   name: string;
   code: string;
@@ -67,28 +73,193 @@ export interface StoreDetail {
   city: string;
   state: string;
   timezone: string;
-  meeting_cadence: string | null;
   gm_name: string | null;
   gm_email: string | null;
+  meeting_cadence: string | null;
   is_active: boolean;
-  created_at: string;
-  recent_meetings: MeetingBrief[];
 }
 
-export interface MeetingBrief {
+export interface StoreStats {
+  total_meetings: number;
+  total_flags_all_time: number;
+  current_open_flags: number;
+  current_overdue_flags: number;
+  response_rate: number;
+  avg_flags_per_meeting: number;
+  most_common_flag_category: string | null;
+  recurring_issues_count: number;
+}
+
+export interface MeetingFlagSummary {
+  total: number;
+  red: number;
+  yellow: number;
+  open: number;
+  responded: number;
+  response_rate: number;
+}
+
+export interface RecentMeetingItem {
   id: string;
   meeting_date: string;
   status: string;
+  packet_generated_at: string | null;
+  flags: MeetingFlagSummary;
+  response_rate: number;
   packet_url: string | null;
   flagged_items_url: string | null;
-  created_at: string;
 }
 
-export function fetchStore(storeId: string, token?: string): Promise<StoreDetail> {
+export interface StoreUserItem {
+  id: string;
+  name: string;
+  email: string;
+  role_at_store: string;
+}
+
+export interface StoreDetail {
+  store: StoreInfo;
+  stats: StoreStats;
+  recent_meetings: RecentMeetingItem[];
+  users: StoreUserItem[];
+}
+
+export interface FlagTrendMeeting {
+  date: string;
+  red: number;
+  yellow: number;
+  responded: number;
+  response_rate: number;
+}
+
+export interface FlagTrendsData {
+  meetings: FlagTrendMeeting[];
+}
+
+export function fetchStoreDetail(storeId: string, token?: string): Promise<StoreDetail> {
   return apiFetch(`/stores/${storeId}`, { token });
 }
 
-// --- Meetings ---
+export function fetchStoreFlagTrends(storeId: string, token?: string): Promise<FlagTrendsData> {
+  return apiFetch(`/stores/${storeId}/flag-trends`, { token });
+}
+
+export function fetchStoreMeetings(storeId: string, token?: string, limit?: number): Promise<RecentMeetingItem[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return apiFetch(`/stores/${storeId}/meetings${params}`, { token });
+}
+
+// --- Meeting Detail ---
+export interface MeetingInfo {
+  id: string;
+  store_id: string;
+  store_name: string;
+  meeting_date: string;
+  status: string;
+  packet_generated_at: string | null;
+  packet_url: string | null;
+  flagged_items_url: string | null;
+  notes: string | null;
+}
+
+export interface ExecutiveSummary {
+  new_vehicle_count: number;
+  new_vehicle_floorplan_total: number;
+  used_vehicle_count: number;
+  used_over_60_days: number;
+  used_over_90_days: number;
+  used_over_90_exposure: number;
+  service_loaner_count: number;
+  service_loaner_neg_equity_total: number;
+  parts_turnover: number | null;
+  open_ro_count: number;
+  receivables_over_30_total: number;
+  missing_titles_count: number;
+  contracts_in_transit_count: number;
+  floorplan_variance: number | null;
+}
+
+export interface FlagsByCategoryItem {
+  red: number;
+  yellow: number;
+}
+
+export interface FlagsSummary {
+  total: number;
+  red: number;
+  yellow: number;
+  open: number;
+  responded: number;
+  overdue: number;
+  by_category: Record<string, FlagsByCategoryItem>;
+}
+
+export interface MeetingDetail {
+  meeting: MeetingInfo;
+  executive_summary: ExecutiveSummary;
+  flags_summary: FlagsSummary;
+}
+
+export interface AssignedToInfo {
+  id: string;
+  name: string;
+  email: string;
+  deadline: string | null;
+  assignment_status: string | null;
+}
+
+export interface FlagResponseInfoType {
+  text: string;
+  submitted_at: string | null;
+  responder: string | null;
+}
+
+export interface MeetingFlagDetail {
+  id: string;
+  category: string;
+  severity: string;
+  message: string;
+  field_name: string;
+  field_value: string | null;
+  threshold: string | null;
+  status: string;
+  assigned_to: AssignedToInfo | null;
+  response: FlagResponseInfoType | null;
+  deadline: string | null;
+  is_overdue: boolean;
+  escalation_level: number;
+  created_at: string | null;
+}
+
+export interface MeetingDataResponse {
+  meeting_id: string;
+  category: string;
+  data: Record<string, Record<string, unknown>[]>;
+}
+
+export function fetchMeetingDetail(meetingId: string, token?: string): Promise<MeetingDetail> {
+  return apiFetch(`/meetings/${meetingId}`, { token });
+}
+
+export function fetchMeetingData(meetingId: string, category: string, token?: string): Promise<MeetingDataResponse> {
+  return apiFetch(`/meetings/${meetingId}/data/${category}`, { token });
+}
+
+export function fetchMeetingDetailFlags(
+  meetingId: string,
+  filters?: { severity?: string; category?: string; status?: string; sort_by?: string },
+  token?: string,
+): Promise<MeetingFlagDetail[]> {
+  const params = new URLSearchParams();
+  if (filters?.severity) params.set("severity", filters.severity);
+  if (filters?.category) params.set("category", filters.category);
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.sort_by) params.set("sort_by", filters.sort_by);
+  const qs = params.toString();
+  return apiFetch(`/meetings/${meetingId}/flags${qs ? `?${qs}` : ""}`, { token });
+}
+
+// --- Meetings (legacy) ---
 export interface MeetingSummary {
   meeting: {
     id: string;
@@ -141,6 +312,88 @@ export function fetchMeetingSummary(meetingId: string, token?: string): Promise<
 
 export function fetchMeetingFlags(meetingId: string, token?: string): Promise<FlagItem[]> {
   return apiFetch(`/flags/${meetingId}`, { token });
+}
+
+// --- Flag Workflow ---
+export interface MyFlagItem {
+  id: string;
+  assignment_id: string;
+  category: string;
+  severity: string;
+  message: string;
+  field_name: string;
+  field_value: string | null;
+  threshold: string | null;
+  status: string;
+  assignment_status: string;
+  store_id: string;
+  store_name: string;
+  meeting_id: string;
+  meeting_date: string;
+  deadline: string;
+  is_overdue: boolean;
+  days_overdue: number;
+  escalation_level: number;
+  response_text: string | null;
+  responded_at: string | null;
+  created_at: string | null;
+}
+
+export function fetchMyFlags(
+  token?: string,
+  filters?: { status?: string; store_id?: string },
+): Promise<MyFlagItem[]> {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.store_id) params.set("store_id", filters.store_id);
+  const qs = params.toString();
+  return apiFetch(`/flags/my/assigned${qs ? `?${qs}` : ""}`, { token });
+}
+
+export function assignFlag(
+  flagId: string,
+  assignedToId: string,
+  token?: string,
+): Promise<{ id: string; flag_id: string; assigned_to_id: string; deadline: string; status: string }> {
+  return apiFetch(`/flags/${flagId}/assign`, {
+    method: "POST",
+    body: JSON.stringify({ assigned_to_id: assignedToId }),
+    token,
+  });
+}
+
+export function respondToFlag(
+  flagId: string,
+  responseText: string,
+  token?: string,
+): Promise<{ id: string; flag_id: string; response_text: string; created_at: string | null }> {
+  return apiFetch(`/flags/${flagId}/respond-workflow`, {
+    method: "POST",
+    body: JSON.stringify({ response_text: responseText }),
+    token,
+  });
+}
+
+export function escalateFlag(
+  flagId: string,
+  reason?: string,
+  token?: string,
+): Promise<{ id: string; status: string; escalation_level: number }> {
+  return apiFetch(`/flags/${flagId}/escalate`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason || null }),
+    token,
+  });
+}
+
+export function autoAssignMeetingFlags(
+  meetingId: string,
+  token?: string,
+): Promise<{ assigned_count: number; unassigned_count: number; by_category: Record<string, number> }> {
+  return apiFetch(`/meetings/${meetingId}/auto-assign`, {
+    method: "POST",
+    token,
+  });
 }
 
 // --- Auth ---

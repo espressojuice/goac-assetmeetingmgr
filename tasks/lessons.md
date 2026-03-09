@@ -26,4 +26,7 @@
 - **2026-03-09**: OCR uses `"` and `'` as negative sign prefixes (e.g. `"24,900.00` = `-24,900.00`). Replace these with `-` before currency parsing.
 - **2026-03-09**: When testing PDF generators without a DB, use MockObj with `__getattr__` returning None for missing attrs, and wrap string enum fields in _EnumLike objects that provide `.value` and `__hash__`.
 - **2026-03-09**: FlaggingEngine._evaluate_record works with any object that supports getattr — just wrap parsed dicts in a simple class. No DB needed for flag evaluation.
+- **2026-03-09**: Executive summary should be computed from actual parsed data, not stored separately — keeps it always in sync. Use efficient aggregation queries (COUNT, SUM with filters) rather than loading all records.
 - **2026-03-09**: When adding new SQLAlchemy models with relationships to existing models, ensure the string-referenced class name in `Mapped[List["ClassName"]]` matches the actual class name exactly (e.g., `FlagResponseRecord` not `FlagResponse`).
+- **2026-03-09**: 10-character minimum on flag responses prevents cop-out answers. Corporate wanted accountability, not checkboxes.
+- **2026-03-09**: Recurring flag detection compares by category + field_name + field_value (stock_number, ro_number, etc.) — not just by message text, which can change slightly between meetings.

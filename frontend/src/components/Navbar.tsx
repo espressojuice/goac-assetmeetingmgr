@@ -2,18 +2,46 @@
 
 import { useSession, signIn, signOut } from "next-auth/react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const pathname = usePathname();
+  const active = pathname === href || pathname?.startsWith(href + "/");
+  return (
+    <Link
+      href={href}
+      className={`text-sm px-3 py-1 rounded ${
+        active ? "bg-gray-700 text-white" : "text-gray-300 hover:text-white hover:bg-gray-700"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
 
 export function Navbar() {
   const { data: session, status } = useSession();
+  const role = (session as any)?.role;
 
   return (
     <nav className="bg-goac-dark text-white px-6 py-3 flex items-center justify-between">
-      <Link href="/dashboard" className="text-xl font-bold tracking-tight">
-        GOAC Asset Meeting Manager
-      </Link>
+      <div className="flex items-center gap-6">
+        <Link href="/dashboard" className="text-xl font-bold tracking-tight">
+          GOAC Asset Meeting Manager
+        </Link>
+        {status === "authenticated" && (
+          <div className="hidden sm:flex items-center gap-1">
+            <NavLink href="/dashboard">Dashboard</NavLink>
+            <NavLink href="/flags">My Flags</NavLink>
+          </div>
+        )}
+      </div>
       <div className="flex items-center gap-4">
         {status === "authenticated" && session?.user ? (
           <>
+            {role && (
+              <span className="text-xs text-gray-400 uppercase">{role}</span>
+            )}
             <span className="text-sm text-gray-300">
               {session.user.name}
             </span>

@@ -13,12 +13,22 @@ from app.api.schemas import (
     StoreCreateRequest,
     StoreDetailResponse,
     MeetingBriefResponse,
+    RichStoreDetailResponse,
+    FlagTrendsResponse,
 )
 from app.database import get_db
 from app.models.meeting import Meeting
 from app.models.store import Store
+from app.services.store_service import get_store_detail, get_flag_trends
 
 router = APIRouter()
+
+
+def _parse_store_id(store_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(store_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid store_id format")
 
 
 @router.get("/stores", response_model=list[StoreResponse])
@@ -48,55 +58,28 @@ async def list_stores(db: AsyncSession = Depends(get_db)) -> list[StoreResponse]
     ]
 
 
-@router.get("/stores/{store_id}", response_model=StoreDetailResponse)
+@router.get("/stores/{store_id}", response_model=RichStoreDetailResponse)
 async def get_store(
     store_id: str, db: AsyncSession = Depends(get_db)
-) -> StoreDetailResponse:
-    """Get store details including recent meetings."""
-    try:
-        store_uuid = uuid.UUID(store_id)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid store_id format")
-
-    result = await db.execute(select(Store).where(Store.id == store_uuid))
-    store = result.scalar_one_or_none()
-    if not store:
+) -> dict:
+    """Get rich store details with stats, meetings, and users."""
+    store_uuid = _parse_store_id(store_id)
+    detail = await get_store_detail(store_uuid, db)
+    if not detail:
         raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    return detail
 
-    # Get recent meetings
-    meetings_result = await db.execute(
-        select(Meeting)
-        .where(Meeting.store_id == store_uuid)
-        .order_by(Meeting.meeting_date.desc())
-        .limit(10)
-    )
-    meetings = list(meetings_result.scalars().all())
 
-    return StoreDetailResponse(
-        id=store.id,
-        name=store.name,
-        code=store.code,
-        brand=store.brand,
-        city=store.city,
-        state=store.state,
-        timezone=store.timezone,
-        meeting_cadence=store.meeting_cadence,
-        gm_name=store.gm_name,
-        gm_email=store.gm_email,
-        is_active=store.is_active,
-        created_at=store.created_at,
-        recent_meetings=[
-            MeetingBriefResponse(
-                id=m.id,
-                meeting_date=m.meeting_date,
-                status=m.status.value,
-                packet_url=m.packet_url,
-                flagged_items_url=m.flagged_items_url,
-                created_at=m.created_at,
-            )
-            for m in meetings
-        ],
-    )
+@router.get("/stores/{store_id}/flag-trends", response_model=FlagTrendsResponse)
+async def get_store_flag_trends(
+    store_id: str, db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Get flag trend data over the last 6 meetings for charts."""
+    store_uuid = _parse_store_id(store_id)
+    trends = await get_flag_trends(store_uuid, db)
+    if trends is None:
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    return trends
 
 
 @router.post("/stores", response_model=StoreResponse, status_code=201)
@@ -147,10 +130,7 @@ async def get_store_meetings(
     db: AsyncSession = Depends(get_db),
 ) -> list[MeetingBriefResponse]:
     """Get recent meetings for a store, ordered by date descending."""
-    try:
-        store_uuid = uuid.UUID(store_id)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid store_id format")
+    store_uuid = _parse_store_id(store_id)
 
     # Verify store exists
     store_result = await db.execute(select(Store).where(Store.id == store_uuid))
