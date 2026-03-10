@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStore
 
 security = HTTPBearer(auto_error=False)
 
@@ -94,3 +94,73 @@ def require_role(*roles: UserRole):
             )
         return user
     return check_role
+
+
+# ── Convenience role dependencies ─────────────────────────────────────
+
+
+async def require_corporate(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Require corporate role."""
+    if current_user.role != UserRole.CORPORATE:
+        raise HTTPException(status_code=403, detail="Corporate access required")
+    return current_user
+
+
+async def require_corporate_or_gm(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Require corporate or GM role."""
+    if current_user.role not in (UserRole.CORPORATE, UserRole.GM):
+        raise HTTPException(status_code=403, detail="Corporate or GM access required")
+    return current_user
+
+
+# ── Store-scoped access helpers ───────────────────────────────────────
+
+
+async def _user_has_store_access(
+    user_id: uuid.UUID, store_id: uuid.UUID, db: AsyncSession
+) -> bool:
+    """Check if a user has an explicit UserStore association."""
+    result = await db.execute(
+        select(UserStore).where(
+            UserStore.user_id == user_id,
+            UserStore.store_id == store_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def verify_store_access(
+    store_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Verify user has access to the specified store.
+
+    Corporate: always pass.
+    GM/Manager: must have UserStore association.
+    """
+    if current_user.role == UserRole.CORPORATE:
+        return current_user
+
+    try:
+        store_uuid = uuid.UUID(store_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid store_id format")
+
+    if not await _user_has_store_access(current_user.id, store_uuid, db):
+        raise HTTPException(status_code=403, detail="You do not have access to this store")
+    return current_user
+
+
+async def get_user_store_ids(user: User, db: AsyncSession) -> list[uuid.UUID]:
+    """Return list of store IDs the user can access. Corporate returns empty (meaning all)."""
+    if user.role == UserRole.CORPORATE:
+        return []  # empty = no filter needed
+    result = await db.execute(
+        select(UserStore.store_id).where(UserStore.user_id == user.id)
+    )
+    return list(result.scalars().all())

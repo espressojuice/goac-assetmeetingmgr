@@ -14,7 +14,7 @@ from app.main import app
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
 from app.models.meeting import Meeting, MeetingStatus
 from app.models.store import Store
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStore
 from app.models.accountability import FlagAssignment, AssignmentStatus
 
 
@@ -80,6 +80,10 @@ async def gm_user(db_session, store):
         role=UserRole.GM,
     )
     db_session.add(u)
+    await db_session.flush()
+    # Associate GM with their store
+    assoc = UserStore(user_id=u.id, store_id=store.id)
+    db_session.add(assoc)
     await db_session.commit()
     return u
 
@@ -98,7 +102,7 @@ async def corporate_user(db_session):
 
 
 @pytest_asyncio.fixture
-async def manager_user(db_session):
+async def manager_user(db_session, store):
     u = User(
         id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
         email="manager@test.com",
@@ -106,6 +110,9 @@ async def manager_user(db_session):
         role=UserRole.MANAGER,
     )
     db_session.add(u)
+    await db_session.flush()
+    assoc = UserStore(user_id=u.id, store_id=store.id)
+    db_session.add(assoc)
     await db_session.commit()
     return u
 

@@ -7,8 +7,8 @@ Automate, standardize, and enforce accountability for asset/receivable meetings 
 ### Phase 1: Packet Generator + Flagging *(COMPLETE)*
 Parse R&R DMS exports (PDF schedules, GL reports) into structured data. Apply configurable flagging rules to surface issues. Generate standardized meeting packets and flagged-item reports.
 
-### Phase 2: Accountability Web App *(IN PROGRESS)*
-Web interface for meeting scheduling, packet review, flag responses, and escalation tracking. Google OAuth authentication with role-based access. Next.js frontend with corporate dashboard, store detail, and meeting detail pages. Email notifications via SendGrid/Postmark.
+### Phase 2: Accountability Web App *(COMPLETE)*
+Web interface for meeting scheduling, packet review, flag responses, and escalation tracking. Google OAuth authentication with role-based access (corporate/gm/manager). Next.js frontend with corporate dashboard, store detail, and meeting detail pages. Email notifications via SendGrid. Full RBAC on all API routes.
 
 ### Phase 3: Full Automation
 Automated DMS export ingestion, trend analysis, cross-store benchmarking, and executive dashboards.
@@ -71,6 +71,7 @@ Automated DMS export ingestion, trend analysis, cross-store benchmarking, and ex
 | Model | Table | Description |
 |-------|-------|-------------|
 | User | `users` | Users with Google OAuth, roles, and login tracking |
+| UserStore | `user_stores` | Store access associations for GMs and managers |
 
 ### Accountability (`accountability.py`)
 | Model | Table | Description |
@@ -209,58 +210,68 @@ When `SENDGRID_API_KEY` is not set, the email service logs all emails that *woul
 
 All routes are prefixed with `/api/v1`. Health check is at root `/health`.
 
-### Upload
+All routes require JWT authentication unless noted. Access is scoped by role: **corporate** (all stores), **gm** (their stores), **manager** (their stores, read-only, own flags only).
+
+### Auth (Public)
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/upload` | Upload a single R&R report PDF for processing |
+| POST | `/api/v1/auth/callback` | Google OAuth callback — creates/updates user, returns JWT |
+| GET | `/api/v1/auth/me` | Get current user profile (requires JWT) |
+
+### Upload (Corporate + GM)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/upload` | Upload a single R&R report PDF. GM: own stores only |
 | POST | `/api/v1/upload/bulk` | Upload multiple PDFs for the same meeting |
 
-### Packets
+### Packets (Authenticated, store-scoped)
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/packets/{meeting_id}` | Download the generated packet PDF |
 | GET | `/api/v1/packets/{meeting_id}/flagged-items` | Download the flagged items report PDF |
 | GET | `/api/v1/packets/{meeting_id}/summary` | Get JSON summary of meeting data and flags |
 
-### Flags
+### Flags (Authenticated, store-scoped)
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/flags/{meeting_id}` | Get flags with optional severity/category/status filters |
-| GET | `/api/v1/flags/{meeting_id}/stats` | Get flag statistics (counts by severity, status, category) |
+| GET | `/api/v1/flags/{meeting_id}` | Get flags (manager: only assigned flags) |
+| GET | `/api/v1/flags/{meeting_id}/stats` | Get flag statistics |
 | PATCH | `/api/v1/flags/{flag_id}/respond` | Submit a response to a flagged item |
+| POST | `/api/v1/flags/{flag_id}/assign` | Assign flag to user (corporate + GM only) |
+| POST | `/api/v1/flags/{flag_id}/respond-workflow` | Submit response (assigned user or corporate) |
+| POST | `/api/v1/flags/{flag_id}/escalate` | Escalate flag (corporate + GM only) |
+| GET | `/api/v1/flags/my/assigned` | Get flags assigned to current user |
+| GET | `/api/v1/flags/overdue/all` | Get overdue flags (scoped by role) |
+| POST | `/api/v1/meetings/{meeting_id}/auto-assign` | Auto-assign flags (corporate + GM only) |
 
-### Stores
+### Stores (Authenticated, store-scoped)
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/stores` | List all active stores |
-| GET | `/api/v1/stores/{store_id}` | Get store details with recent meetings |
-| POST | `/api/v1/stores` | Create a new store |
+| GET | `/api/v1/stores` | List stores (filtered by role) |
+| GET | `/api/v1/stores/{store_id}` | Get store details |
+| POST | `/api/v1/stores` | Create a new store (corporate only) |
 | GET | `/api/v1/stores/{store_id}/meetings` | Get recent meetings for a store |
+| GET | `/api/v1/stores/{store_id}/flag-trends` | Get flag trend data (last 6 meetings) |
 
-### Meetings
+### Meetings (Authenticated, store-scoped)
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/meetings/{meeting_id}` | Get meeting details |
-| GET | `/api/v1/meetings/{meeting_id}/data/{category}` | Get parsed data by category (inventory/parts/financial/operations) |
+| GET | `/api/v1/meetings/{meeting_id}/data/{category}` | Get parsed data by category |
+| GET | `/api/v1/meetings/{meeting_id}/flags` | Get flags with filters and sorting |
 
-### Auth (Phase 2)
+### Dashboard (Authenticated, store-scoped)
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/auth/callback` | Google OAuth callback — creates/updates user, returns JWT |
-| GET | `/api/v1/auth/me` | Get current user profile (requires JWT) |
+| GET | `/api/v1/dashboard` | Aggregated overview (filtered by role) |
 
-### Dashboard (Phase 2)
+### Notifications (Authenticated, own only)
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/dashboard` | Aggregated multi-store overview with flag stats |
-
-### Notifications (Phase 2)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/notifications` | Get current user's notifications (supports `unread_only`, `limit`) |
+| GET | `/api/v1/notifications` | Get current user's notifications |
 | PATCH | `/api/v1/notifications/{notification_id}/read` | Mark a notification as read |
 | POST | `/api/v1/notifications/read-all` | Mark all notifications as read |
-| GET | `/api/v1/notifications/unread-count` | Get unread notification count (for navbar badge) |
+| GET | `/api/v1/notifications/unread-count` | Get unread notification count |
 
 ## Phase 1 Deliverables
 
@@ -338,4 +349,4 @@ cd backend && python3 -m pytest tests/ -v
 
 **Phase 1 COMPLETE.** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).
 
-**Phase 2 IN PROGRESS.** Auth system (Google OAuth + JWT), 5 accountability models, corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 407 tests passing.
+**Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 455 tests passing.

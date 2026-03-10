@@ -34,7 +34,7 @@ def _mock_processing_result(meeting_id: str) -> dict:
 @pytest.mark.asyncio
 class TestUploadEndpoint:
 
-    async def test_upload_with_valid_pdf(self, client, sample_store):
+    async def test_upload_with_valid_pdf(self, client, sample_store, auth_headers):
         """Upload a valid PDF and get processing summary."""
         mock_result = _mock_processing_result("test-meeting-id")
 
@@ -46,6 +46,7 @@ class TestUploadEndpoint:
                 UPLOAD_URL,
                 files=[_make_pdf_file()],
                 data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+                headers=auth_headers,
             )
 
         assert response.status_code == 200
@@ -55,46 +56,50 @@ class TestUploadEndpoint:
         assert data["flags_generated"]["total"] == 5
         assert "meeting_id" in data
 
-    async def test_upload_non_pdf_returns_422(self, client, sample_store):
+    async def test_upload_non_pdf_returns_422(self, client, sample_store, auth_headers):
         """Uploading a non-PDF file returns 422."""
         response = await client.post(
             UPLOAD_URL,
             files=[("file", ("report.xlsx", io.BytesIO(b"fake"), "application/octet-stream"))],
             data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+            headers=auth_headers,
         )
         assert response.status_code == 422
         assert "PDF" in response.json()["detail"]
 
-    async def test_upload_invalid_store_returns_404(self, client):
+    async def test_upload_invalid_store_returns_404(self, client, auth_headers):
         """Uploading with a nonexistent store_id returns 404."""
         response = await client.post(
             UPLOAD_URL,
             files=[_make_pdf_file()],
             data={"store_id": FAKE_STORE_ID, "meeting_date": "2026-02-11"},
+            headers=auth_headers,
         )
         assert response.status_code == 404
         assert "not found" in response.json()["detail"]
 
-    async def test_upload_invalid_date_format(self, client, sample_store):
+    async def test_upload_invalid_date_format(self, client, sample_store, auth_headers):
         """Uploading with invalid date format returns 422."""
         response = await client.post(
             UPLOAD_URL,
             files=[_make_pdf_file()],
             data={"store_id": STORE_ID, "meeting_date": "02/11/2026"},
+            headers=auth_headers,
         )
         assert response.status_code == 422
         assert "YYYY-MM-DD" in response.json()["detail"]
 
-    async def test_upload_invalid_store_id_format(self, client):
+    async def test_upload_invalid_store_id_format(self, client, auth_headers):
         """Uploading with invalid UUID format returns 422."""
         response = await client.post(
             UPLOAD_URL,
             files=[_make_pdf_file()],
             data={"store_id": "not-a-uuid", "meeting_date": "2026-02-11"},
+            headers=auth_headers,
         )
         assert response.status_code == 422
 
-    async def test_upload_processing_failure_sets_error_status(self, client, sample_store):
+    async def test_upload_processing_failure_sets_error_status(self, client, sample_store, auth_headers):
         """When processing fails, meeting status is set to error and 500 returned."""
         with patch("app.api.routes.upload.ProcessingService") as MockService:
             instance = MockService.return_value
@@ -104,12 +109,13 @@ class TestUploadEndpoint:
                 UPLOAD_URL,
                 files=[_make_pdf_file()],
                 data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+                headers=auth_headers,
             )
 
         assert response.status_code == 500
         assert "Processing failed" in response.json()["detail"]
 
-    async def test_upload_creates_meeting_if_not_exists(self, client, sample_store):
+    async def test_upload_creates_meeting_if_not_exists(self, client, sample_store, auth_headers):
         """First upload for a store+date combo creates a new meeting."""
         mock_result = _mock_processing_result("new-meeting-id")
 
@@ -121,12 +127,13 @@ class TestUploadEndpoint:
                 UPLOAD_URL,
                 files=[_make_pdf_file()],
                 data={"store_id": STORE_ID, "meeting_date": "2026-03-15"},
+                headers=auth_headers,
             )
 
         assert response.status_code == 200
         assert response.json()["meeting_id"]
 
-    async def test_upload_reuses_existing_meeting(self, client, sample_store, sample_meeting):
+    async def test_upload_reuses_existing_meeting(self, client, sample_store, sample_meeting, auth_headers):
         """Uploading to an existing store+date reuses the meeting."""
         mock_result = _mock_processing_result(str(sample_meeting.id))
 
@@ -138,16 +145,26 @@ class TestUploadEndpoint:
                 UPLOAD_URL,
                 files=[_make_pdf_file()],
                 data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+                headers=auth_headers,
             )
 
         assert response.status_code == 200
         assert response.json()["meeting_id"] == str(sample_meeting.id)
 
+    async def test_upload_unauthenticated_returns_401(self, client, sample_store):
+        """Unauthenticated upload returns 401."""
+        response = await client.post(
+            UPLOAD_URL,
+            files=[_make_pdf_file()],
+            data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+        )
+        assert response.status_code == 401
+
 
 @pytest.mark.asyncio
 class TestBulkUploadEndpoint:
 
-    async def test_bulk_upload_multiple_files(self, client, sample_store):
+    async def test_bulk_upload_multiple_files(self, client, sample_store, auth_headers):
         """Bulk upload with multiple PDFs processes all and merges results."""
         mock_result = _mock_processing_result("test-meeting-id")
 
@@ -162,6 +179,7 @@ class TestBulkUploadEndpoint:
                     _make_pdf_file("report2.pdf", field="files"),
                 ],
                 data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+                headers=auth_headers,
             )
 
         assert response.status_code == 200
@@ -170,7 +188,7 @@ class TestBulkUploadEndpoint:
         assert data["total_pages_extracted"] == 54  # 27 * 2
         assert data["records_parsed"]["NewVehicleInventory"] == 30  # 15 * 2
 
-    async def test_bulk_upload_non_pdf_rejected(self, client, sample_store):
+    async def test_bulk_upload_non_pdf_rejected(self, client, sample_store, auth_headers):
         """Bulk upload rejects non-PDF files."""
         response = await client.post(
             BULK_URL,
@@ -179,18 +197,20 @@ class TestBulkUploadEndpoint:
                 ("files", ("data.csv", io.BytesIO(b"csv"), "text/csv")),
             ],
             data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+            headers=auth_headers,
         )
         assert response.status_code == 422
 
-    async def test_bulk_upload_empty_files_rejected(self, client, sample_store):
+    async def test_bulk_upload_empty_files_rejected(self, client, sample_store, auth_headers):
         """Bulk upload with no files returns 422."""
         response = await client.post(
             BULK_URL,
             data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+            headers=auth_headers,
         )
         assert response.status_code == 422
 
-    async def test_bulk_upload_partial_failure(self, client, sample_store):
+    async def test_bulk_upload_partial_failure(self, client, sample_store, auth_headers):
         """If one file fails processing, the entire batch fails."""
         call_count = 0
 
@@ -212,6 +232,7 @@ class TestBulkUploadEndpoint:
                     _make_pdf_file("report2.pdf", field="files"),
                 ],
                 data={"store_id": STORE_ID, "meeting_date": "2026-02-11"},
+                headers=auth_headers,
             )
 
         assert response.status_code == 500

@@ -12,6 +12,7 @@ from app.api.schemas import (
     MeetingDataResponse,
     MeetingFlagDetailResponse,
 )
+from app.auth import get_current_user, verify_store_access, get_user_store_ids
 from app.database import get_db
 from app.models.meeting import Meeting
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
@@ -19,6 +20,7 @@ from app.models.inventory import NewVehicleInventory, UsedVehicleInventory, Serv
 from app.models.parts import PartsInventory, PartsAnalysis
 from app.models.financial import Receivable, FIChargeback, ContractInTransit, Prepaid, PolicyAdjustment
 from app.models.operations import OpenRepairOrder, WarrantyClaim, MissingTitle, SlowToAccounting
+from app.models.user import User, UserRole
 from app.services.meeting_service import get_meeting_detail, get_meeting_flags
 
 router = APIRouter()
@@ -93,17 +95,39 @@ async def _validate_meeting(meeting_id: str, db: AsyncSession) -> uuid.UUID:
     return meeting_uuid
 
 
-@router.get("/meetings/{meeting_id}", response_model=MeetingDetailResponse)
-async def get_meeting(
-    meeting_id: str, db: AsyncSession = Depends(get_db)
-) -> MeetingDetailResponse:
-    """Get comprehensive meeting details with executive summary and flag stats."""
+async def _get_meeting_with_access_check(
+    meeting_id: str, current_user: User, db: AsyncSession
+) -> Meeting:
+    """Fetch meeting and verify user has access to its store."""
     try:
         meeting_uuid = uuid.UUID(meeting_id)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid meeting_id format")
 
-    detail = await get_meeting_detail(meeting_uuid, db)
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_uuid))
+    meeting = result.scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+
+    # Corporate can access any meeting
+    if current_user.role != UserRole.CORPORATE:
+        from app.auth import _user_has_store_access
+        if not await _user_has_store_access(current_user.id, meeting.store_id, db):
+            raise HTTPException(status_code=403, detail="You do not have access to this meeting's store")
+
+    return meeting
+
+
+@router.get("/meetings/{meeting_id}", response_model=MeetingDetailResponse)
+async def get_meeting(
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MeetingDetailResponse:
+    """Get comprehensive meeting details with executive summary and flag stats."""
+    meeting = await _get_meeting_with_access_check(meeting_id, current_user, db)
+
+    detail = await get_meeting_detail(meeting.id, db)
     if not detail:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
 
@@ -114,6 +138,7 @@ async def get_meeting(
 async def get_meeting_data(
     meeting_id: str,
     category: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MeetingDataResponse:
     """Get parsed data for a specific category with associated flags.
@@ -126,7 +151,8 @@ async def get_meeting_data(
             detail=f"Invalid category: {category}. Must be one of: {', '.join(_CATEGORY_MODELS.keys())}",
         )
 
-    meeting_uuid = await _validate_meeting(meeting_id, db)
+    meeting = await _get_meeting_with_access_check(meeting_id, current_user, db)
+    meeting_uuid = meeting.id
 
     # Load flags for this meeting+category to attach to records
     flag_result = await db.execute(
@@ -193,10 +219,11 @@ async def get_meeting_flags_endpoint(
     category: Optional[str] = None,
     status: Optional[str] = None,
     sort_by: str = "severity",
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MeetingFlagDetailResponse]:
     """Get all flags for a meeting with full detail including assignment and response info."""
-    meeting_uuid = await _validate_meeting(meeting_id, db)
+    meeting = await _get_meeting_with_access_check(meeting_id, current_user, db)
 
     # Validate filter values
     if severity:
@@ -218,7 +245,7 @@ async def get_meeting_flags_endpoint(
         raise HTTPException(status_code=422, detail=f"Invalid sort_by: {sort_by}")
 
     flags = await get_meeting_flags(
-        meeting_uuid, db,
+        meeting.id, db,
         severity=severity, category=category, status=status, sort_by=sort_by,
     )
     return flags

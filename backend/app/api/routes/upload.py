@@ -11,10 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import UploadResponse, BulkUploadResponse
+from app.auth import get_current_user, require_corporate_or_gm, verify_store_access
 from app.config import settings
 from app.database import get_db
 from app.models.meeting import Meeting, MeetingStatus
 from app.models.store import Store
+from app.models.user import User, UserRole
 from app.services.processing_service import ProcessingService
 
 logger = logging.getLogger(__name__)
@@ -77,17 +79,23 @@ async def upload_report(
     file: UploadFile,
     store_id: str = Form(...),
     meeting_date: str = Form(...),
+    current_user: User = Depends(require_corporate_or_gm),
     db: AsyncSession = Depends(get_db),
 ) -> UploadResponse:
     """
-    Upload an R&R report PDF for processing.
-
-    1. Validate file is PDF
-    2. Create or get Meeting record for this store + date
-    3. Save uploaded file to disk
-    4. Run ProcessingService.process_upload()
-    5. Return processing summary
+    Upload an R&R report PDF for processing. Requires corporate or GM role.
+    GMs can only upload for their stores.
     """
+    # Verify store access for non-corporate users
+    if current_user.role != UserRole.CORPORATE:
+        from app.auth import _user_has_store_access
+        try:
+            store_uuid = uuid.UUID(store_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid store_id format")
+        if not await _user_has_store_access(current_user.id, store_uuid, db):
+            raise HTTPException(status_code=403, detail="You do not have access to this store")
+
     await _validate_pdf(file)
     store = await _get_store(store_id, db)
     meeting = await _get_or_create_meeting(store.id, meeting_date, db)
@@ -130,12 +138,23 @@ async def upload_bulk_reports(
     files: list[UploadFile],
     store_id: str = Form(...),
     meeting_date: str = Form(...),
+    current_user: User = Depends(require_corporate_or_gm),
     db: AsyncSession = Depends(get_db),
 ) -> BulkUploadResponse:
     """
     Upload multiple R&R report PDFs for the same meeting.
-    Process each file and merge results.
+    Requires corporate or GM role. GMs can only upload for their stores.
     """
+    # Verify store access for non-corporate users
+    if current_user.role != UserRole.CORPORATE:
+        from app.auth import _user_has_store_access
+        try:
+            store_uuid = uuid.UUID(store_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid store_id format")
+        if not await _user_has_store_access(current_user.id, store_uuid, db):
+            raise HTTPException(status_code=403, detail="You do not have access to this store")
+
     if not files:
         raise HTTPException(status_code=422, detail="At least one file is required")
 

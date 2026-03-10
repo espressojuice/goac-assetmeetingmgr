@@ -8,11 +8,13 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.auth import create_access_token
 from app.database import Base, get_db
 from app.main import app
 from app.models.store import Store
 from app.models.meeting import Meeting, MeetingStatus
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
+from app.models.user import User, UserRole, UserStore
 
 
 @pytest_asyncio.fixture
@@ -49,6 +51,73 @@ async def client(db_engine):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
+
+
+# ── User fixtures ─────────────────────────────────────────────────────
+
+
+@pytest_asyncio.fixture
+async def corporate_user(db_session):
+    """Create a corporate user for testing (default for backward compatibility)."""
+    user = User(
+        id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        email="admin@goac.com",
+        name="Corporate Admin",
+        role=UserRole.CORPORATE,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def gm_user(db_session, sample_store):
+    """Create a GM user with access to sample_store."""
+    user = User(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        email="gm@ashdown.com",
+        name="GM User",
+        role=UserRole.GM,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    # Associate with sample_store
+    assoc = UserStore(user_id=user.id, store_id=sample_store.id)
+    db_session.add(assoc)
+    await db_session.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def manager_user(db_session, sample_store):
+    """Create a manager user with access to sample_store."""
+    user = User(
+        id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        email="manager@ashdown.com",
+        name="Manager User",
+        role=UserRole.MANAGER,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    assoc = UserStore(user_id=user.id, store_id=sample_store.id)
+    db_session.add(assoc)
+    await db_session.commit()
+    return user
+
+
+def auth_header(user: User) -> dict:
+    """Create Authorization header for a user."""
+    token = create_access_token(str(user.id), user.email, user.role.value)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def auth_headers(corporate_user):
+    """Default auth headers using corporate user (backward compatible)."""
+    return auth_header(corporate_user)
+
+
+# ── Data fixtures ─────────────────────────────────────────────────────
 
 
 @pytest_asyncio.fixture

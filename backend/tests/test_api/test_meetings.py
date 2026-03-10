@@ -105,18 +105,18 @@ async def meeting_with_data(db_session: AsyncSession, sample_meeting, sample_sto
 @pytest.mark.asyncio
 class TestGetMeetingDetail:
 
-    async def test_get_meeting_detail_structure(self, client, meeting_with_data):
+    async def test_get_meeting_detail_structure(self, client, meeting_with_data, auth_headers):
         """Meeting detail returns meeting, executive_summary, and flags_summary."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert "meeting" in data
         assert "executive_summary" in data
         assert "flags_summary" in data
 
-    async def test_meeting_info(self, client, meeting_with_data):
+    async def test_meeting_info(self, client, meeting_with_data, auth_headers):
         """Meeting info includes store_name and all expected fields."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         meeting = data["meeting"]
         assert meeting["id"] == MEETING_ID
         assert meeting["store_id"] == STORE_ID
@@ -124,9 +124,9 @@ class TestGetMeetingDetail:
         assert meeting["meeting_date"] == "2026-02-11"
         assert meeting["status"] == "completed"
 
-    async def test_executive_summary_structure(self, client, meeting_with_data):
+    async def test_executive_summary_structure(self, client, meeting_with_data, auth_headers):
         """Executive summary has all expected fields."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         es = data["executive_summary"]
         expected_keys = [
             "new_vehicle_count", "new_vehicle_floorplan_total",
@@ -140,9 +140,9 @@ class TestGetMeetingDetail:
         for key in expected_keys:
             assert key in es, f"Missing key: {key}"
 
-    async def test_executive_summary_values(self, client, meeting_with_data):
+    async def test_executive_summary_values(self, client, meeting_with_data, auth_headers):
         """Executive summary aggregates are computed correctly from parsed data."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         es = data["executive_summary"]
         assert es["new_vehicle_count"] == 3
         assert es["new_vehicle_floorplan_total"] == 135000.00  # 3 * 45000
@@ -160,9 +160,9 @@ class TestGetMeetingDetail:
         assert es["contracts_in_transit_count"] == 1
         assert es["floorplan_variance"] == 500.00
 
-    async def test_flags_summary_structure(self, client, sample_meeting, sample_flags):
+    async def test_flags_summary_structure(self, client, sample_meeting, sample_flags, auth_headers):
         """Flags summary has correct structure with by_category breakdown."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         fs = data["flags_summary"]
         assert "total" in fs
         assert "red" in fs
@@ -172,9 +172,9 @@ class TestGetMeetingDetail:
         assert "overdue" in fs
         assert "by_category" in fs
 
-    async def test_flags_summary_values(self, client, sample_meeting, sample_flags):
+    async def test_flags_summary_values(self, client, sample_meeting, sample_flags, auth_headers):
         """Flags summary values match sample flags (2 red, 2 yellow, 3 open, 1 responded)."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         fs = data["flags_summary"]
         assert fs["total"] == 4
         assert fs["red"] == 2
@@ -182,9 +182,9 @@ class TestGetMeetingDetail:
         assert fs["open"] == 3
         assert fs["responded"] == 1
 
-    async def test_flags_summary_by_category(self, client, sample_meeting, sample_flags):
+    async def test_flags_summary_by_category(self, client, sample_meeting, sample_flags, auth_headers):
         """By-category breakdown shows correct severity counts per category."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         by_cat = data["flags_summary"]["by_category"]
         # sample_flags: inventory (1 red, 1 yellow), financial (1 red), operations (1 yellow)
         assert "inventory" in by_cat
@@ -193,19 +193,19 @@ class TestGetMeetingDetail:
         assert by_cat["financial"]["red"] == 1
         assert by_cat["operations"]["yellow"] == 1
 
-    async def test_meeting_not_found(self, client, sample_store):
+    async def test_meeting_not_found(self, client, sample_store, auth_headers):
         """Nonexistent meeting returns 404."""
-        response = await client.get(f"{MEETINGS_URL}/{FAKE_MEETING}")
+        response = await client.get(f"{MEETINGS_URL}/{FAKE_MEETING}", headers=auth_headers)
         assert response.status_code == 404
 
-    async def test_invalid_meeting_id(self, client):
+    async def test_invalid_meeting_id(self, client, auth_headers):
         """Invalid UUID returns 422."""
-        response = await client.get(f"{MEETINGS_URL}/not-a-uuid")
+        response = await client.get(f"{MEETINGS_URL}/not-a-uuid", headers=auth_headers)
         assert response.status_code == 422
 
-    async def test_empty_meeting_executive_summary(self, client, sample_meeting):
+    async def test_empty_meeting_executive_summary(self, client, sample_meeting, auth_headers):
         """Meeting with no parsed data returns zeroed executive summary."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}", headers=auth_headers)).json()
         es = data["executive_summary"]
         assert es["new_vehicle_count"] == 0
         assert es["used_vehicle_count"] == 0
@@ -216,9 +216,9 @@ class TestGetMeetingDetail:
 @pytest.mark.asyncio
 class TestGetMeetingData:
 
-    async def test_get_inventory_data(self, client, meeting_with_data):
+    async def test_get_inventory_data(self, client, meeting_with_data, auth_headers):
         """Get inventory category data for a meeting."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/inventory")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/inventory", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["category"] == "inventory"
@@ -229,18 +229,18 @@ class TestGetMeetingData:
         assert len(data["data"]["new_vehicles"]) == 3
         assert len(data["data"]["used_vehicles"]) == 5
 
-    async def test_get_parts_data(self, client, sample_meeting):
+    async def test_get_parts_data(self, client, sample_meeting, auth_headers):
         """Get parts category data."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/parts")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/parts", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["category"] == "parts"
         assert "parts_inventory" in data["data"]
         assert "parts_analysis" in data["data"]
 
-    async def test_get_financial_data(self, client, sample_meeting):
+    async def test_get_financial_data(self, client, sample_meeting, auth_headers):
         """Get financial category data."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/financial")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/financial", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["category"] == "financial"
@@ -250,9 +250,9 @@ class TestGetMeetingData:
         assert "prepaids" in data["data"]
         assert "policy_adjustments" in data["data"]
 
-    async def test_get_operations_data(self, client, sample_meeting):
+    async def test_get_operations_data(self, client, sample_meeting, auth_headers):
         """Get operations category data."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/operations")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/operations", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["category"] == "operations"
@@ -261,38 +261,38 @@ class TestGetMeetingData:
         assert "missing_titles" in data["data"]
         assert "slow_to_accounting" in data["data"]
 
-    async def test_data_records_include_flag_field(self, client, meeting_with_data):
+    async def test_data_records_include_flag_field(self, client, meeting_with_data, auth_headers):
         """Each record includes a flag field (null or object)."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/inventory")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/inventory", headers=auth_headers)
         data = response.json()
         for rec in data["data"]["new_vehicles"]:
             assert "flag" in rec
 
-    async def test_invalid_category(self, client, sample_meeting):
+    async def test_invalid_category(self, client, sample_meeting, auth_headers):
         """Invalid category returns 422."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/nonexistent")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/data/nonexistent", headers=auth_headers)
         assert response.status_code == 422
         assert "Invalid category" in response.json()["detail"]
 
-    async def test_meeting_not_found(self, client, sample_store):
+    async def test_meeting_not_found(self, client, sample_store, auth_headers):
         """Data for nonexistent meeting returns 404."""
-        response = await client.get(f"{MEETINGS_URL}/{FAKE_MEETING}/data/inventory")
+        response = await client.get(f"{MEETINGS_URL}/{FAKE_MEETING}/data/inventory", headers=auth_headers)
         assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 class TestGetMeetingFlags:
 
-    async def test_get_flags(self, client, sample_meeting, sample_flags):
+    async def test_get_flags(self, client, sample_meeting, sample_flags, auth_headers):
         """Get all flags for a meeting."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 4
 
-    async def test_flag_detail_structure(self, client, sample_meeting, sample_flags):
+    async def test_flag_detail_structure(self, client, sample_meeting, sample_flags, auth_headers):
         """Each flag has full detail fields."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags", headers=auth_headers)).json()
         flag = data[0]
         expected_keys = [
             "id", "category", "severity", "message", "field_name",
@@ -303,73 +303,73 @@ class TestGetMeetingFlags:
         for key in expected_keys:
             assert key in flag, f"Missing key: {key}"
 
-    async def test_filter_by_severity(self, client, sample_meeting, sample_flags):
+    async def test_filter_by_severity(self, client, sample_meeting, sample_flags, auth_headers):
         """Filter flags by severity."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?severity=red")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?severity=red", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
         assert all(f["severity"] == "red" for f in data)
 
-    async def test_filter_by_category(self, client, sample_meeting, sample_flags):
+    async def test_filter_by_category(self, client, sample_meeting, sample_flags, auth_headers):
         """Filter flags by category."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?category=inventory")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?category=inventory", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
         assert all(f["category"] == "inventory" for f in data)
 
-    async def test_filter_by_status(self, client, sample_meeting, sample_flags):
+    async def test_filter_by_status(self, client, sample_meeting, sample_flags, auth_headers):
         """Filter flags by status."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=responded")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=responded", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
         assert data[0]["status"] == "responded"
 
-    async def test_responded_flag_has_response(self, client, sample_meeting, sample_flags):
+    async def test_responded_flag_has_response(self, client, sample_meeting, sample_flags, auth_headers):
         """Responded flag includes response details."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=responded")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=responded", headers=auth_headers)).json()
         assert len(data) == 1
         flag = data[0]
         assert flag["response"] is not None
         assert flag["response"]["text"] == "Collected on 2/15"
         assert flag["response"]["responder"] == "Jane Smith"
 
-    async def test_open_flags_no_response(self, client, sample_meeting, sample_flags):
+    async def test_open_flags_no_response(self, client, sample_meeting, sample_flags, auth_headers):
         """Open flags have null response."""
-        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=open")).json()
+        data = (await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=open", headers=auth_headers)).json()
         assert all(f["response"] is None for f in data)
 
-    async def test_invalid_severity_filter(self, client, sample_meeting, sample_flags):
+    async def test_invalid_severity_filter(self, client, sample_meeting, sample_flags, auth_headers):
         """Invalid severity returns 422."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?severity=purple")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?severity=purple", headers=auth_headers)
         assert response.status_code == 422
 
-    async def test_invalid_category_filter(self, client, sample_meeting, sample_flags):
+    async def test_invalid_category_filter(self, client, sample_meeting, sample_flags, auth_headers):
         """Invalid category returns 422."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?category=bogus")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?category=bogus", headers=auth_headers)
         assert response.status_code == 422
 
-    async def test_invalid_status_filter(self, client, sample_meeting, sample_flags):
+    async def test_invalid_status_filter(self, client, sample_meeting, sample_flags, auth_headers):
         """Invalid status returns 422."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=bogus")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?status=bogus", headers=auth_headers)
         assert response.status_code == 422
 
-    async def test_invalid_sort_by(self, client, sample_meeting, sample_flags):
+    async def test_invalid_sort_by(self, client, sample_meeting, sample_flags, auth_headers):
         """Invalid sort_by returns 422."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?sort_by=bogus")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?sort_by=bogus", headers=auth_headers)
         assert response.status_code == 422
 
-    async def test_meeting_not_found(self, client, sample_store):
+    async def test_meeting_not_found(self, client, sample_store, auth_headers):
         """Flags for nonexistent meeting returns 404."""
-        response = await client.get(f"{MEETINGS_URL}/{FAKE_MEETING}/flags")
+        response = await client.get(f"{MEETINGS_URL}/{FAKE_MEETING}/flags", headers=auth_headers)
         assert response.status_code == 404
 
-    async def test_combined_filters(self, client, sample_meeting, sample_flags):
+    async def test_combined_filters(self, client, sample_meeting, sample_flags, auth_headers):
         """Multiple filters work together."""
         response = await client.get(
-            f"{MEETINGS_URL}/{MEETING_ID}/flags?severity=red&category=financial"
+            f"{MEETINGS_URL}/{MEETING_ID}/flags?severity=red&category=financial", headers=auth_headers
         )
         assert response.status_code == 200
         data = response.json()
@@ -377,17 +377,17 @@ class TestGetMeetingFlags:
         assert data[0]["severity"] == "red"
         assert data[0]["category"] == "financial"
 
-    async def test_sort_by_category(self, client, sample_meeting, sample_flags):
+    async def test_sort_by_category(self, client, sample_meeting, sample_flags, auth_headers):
         """Sort by category groups flags by category."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?sort_by=category")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags?sort_by=category", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 4
         categories = [f["category"] for f in data]
         assert categories == sorted(categories)
 
-    async def test_empty_result(self, client, sample_meeting):
+    async def test_empty_result(self, client, sample_meeting, auth_headers):
         """Meeting with no flags returns empty list."""
-        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags")
+        response = await client.get(f"{MEETINGS_URL}/{MEETING_ID}/flags", headers=auth_headers)
         assert response.status_code == 200
         assert response.json() == []

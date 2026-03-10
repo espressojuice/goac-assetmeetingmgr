@@ -16,9 +16,16 @@ from app.api.schemas import (
     RichStoreDetailResponse,
     FlagTrendsResponse,
 )
+from app.auth import (
+    get_current_user,
+    require_corporate,
+    verify_store_access,
+    get_user_store_ids,
+)
 from app.database import get_db
 from app.models.meeting import Meeting
 from app.models.store import Store
+from app.models.user import User, UserRole
 from app.services.store_service import get_store_detail, get_flag_trends
 
 router = APIRouter()
@@ -32,11 +39,21 @@ def _parse_store_id(store_id: str) -> uuid.UUID:
 
 
 @router.get("/stores", response_model=list[StoreResponse])
-async def list_stores(db: AsyncSession = Depends(get_db)) -> list[StoreResponse]:
-    """List all active stores."""
-    result = await db.execute(
-        select(Store).where(Store.is_active == True).order_by(Store.name)
-    )
+async def list_stores(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[StoreResponse]:
+    """List active stores visible to the current user."""
+    query = select(Store).where(Store.is_active == True).order_by(Store.name)
+
+    # Non-corporate users only see their assigned stores
+    if current_user.role != UserRole.CORPORATE:
+        store_ids = await get_user_store_ids(current_user, db)
+        if not store_ids:
+            return []
+        query = query.where(Store.id.in_(store_ids))
+
+    result = await db.execute(query)
     stores = list(result.scalars().all())
 
     return [
@@ -60,7 +77,9 @@ async def list_stores(db: AsyncSession = Depends(get_db)) -> list[StoreResponse]
 
 @router.get("/stores/{store_id}", response_model=RichStoreDetailResponse)
 async def get_store(
-    store_id: str, db: AsyncSession = Depends(get_db)
+    store_id: str,
+    current_user: User = Depends(verify_store_access),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Get rich store details with stats, meetings, and users."""
     store_uuid = _parse_store_id(store_id)
@@ -72,7 +91,9 @@ async def get_store(
 
 @router.get("/stores/{store_id}/flag-trends", response_model=FlagTrendsResponse)
 async def get_store_flag_trends(
-    store_id: str, db: AsyncSession = Depends(get_db)
+    store_id: str,
+    current_user: User = Depends(verify_store_access),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Get flag trend data over the last 6 meetings for charts."""
     store_uuid = _parse_store_id(store_id)
@@ -85,9 +106,10 @@ async def get_store_flag_trends(
 @router.post("/stores", response_model=StoreResponse, status_code=201)
 async def create_store(
     body: StoreCreateRequest,
+    current_user: User = Depends(require_corporate),
     db: AsyncSession = Depends(get_db),
 ) -> StoreResponse:
-    """Create a new store."""
+    """Create a new store. Corporate only."""
     # Check for duplicate code
     existing = await db.execute(select(Store).where(Store.code == body.code))
     if existing.scalar_one_or_none():
@@ -127,6 +149,7 @@ async def create_store(
 async def get_store_meetings(
     store_id: str,
     limit: int = 10,
+    current_user: User = Depends(verify_store_access),
     db: AsyncSession = Depends(get_db),
 ) -> list[MeetingBriefResponse]:
     """Get recent meetings for a store, ordered by date descending."""

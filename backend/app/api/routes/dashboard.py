@@ -9,10 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import get_current_user, get_user_store_ids
 from app.database import get_db
 from app.models.store import Store
 from app.models.meeting import Meeting, MeetingStatus
 from app.models.flag import Flag, FlagSeverity, FlagStatus
+from app.models.user import User, UserRole
 
 router = APIRouter()
 
@@ -43,12 +45,27 @@ class DashboardResponse(BaseModel):
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
-async def get_dashboard(db: AsyncSession = Depends(get_db)) -> DashboardResponse:
-    """Return aggregated dashboard data for all active stores."""
-    # Get all active stores
-    result = await db.execute(
-        select(Store).where(Store.is_active == True).order_by(Store.name)
-    )
+async def get_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DashboardResponse:
+    """Return aggregated dashboard data for stores visible to the current user."""
+    # Build store query scoped to user's access
+    query = select(Store).where(Store.is_active == True).order_by(Store.name)
+
+    if current_user.role != UserRole.CORPORATE:
+        store_ids = await get_user_store_ids(current_user, db)
+        if not store_ids:
+            return DashboardResponse(
+                stores=[],
+                totals=DashboardTotals(
+                    total_stores=0, total_open_flags=0, total_overdue=0,
+                    avg_response_rate=0.0, meetings_this_week=0,
+                ),
+            )
+        query = query.where(Store.id.in_(store_ids))
+
+    result = await db.execute(query)
     stores = list(result.scalars().all())
 
     store_items = []

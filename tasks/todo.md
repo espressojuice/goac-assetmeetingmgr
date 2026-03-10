@@ -89,8 +89,10 @@
 - [x] Build manager response page
 - [x] Build email notification service (SendGrid)
 - [x] Implement automated reminders (24h deadline, overdue)
-- [ ] Add role-based access control to all routes
+- [x] Add role-based access control to all routes
 - [x] Build notification center (in-app)
+
+## Phase 2 COMPLETE
 
 ## Session Log
 
@@ -154,3 +156,16 @@
 - Frontend: NotificationBell component in Navbar — bell icon with unread count badge, dropdown with recent notifications, mark read/mark all read, 60s polling, click-to-navigate
 - 5 new config settings: SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME, NOTIFICATION_REMINDER_HOURS, NOTIFICATION_ENABLED
 - 34 new tests (15 email service, 10 scheduler, 9 notification API), 407 total all passing
+
+### Session 12 — 2026-03-09 (Role-Based Access Control)
+- Added UserStore association model for store-scoped access control (migration 003)
+- New auth dependencies: require_corporate, require_corporate_or_gm, verify_store_access, get_user_store_ids
+- Locked down ALL 25 API routes with proper auth enforcement:
+  - Corporate: full access to all stores, meetings, flags, uploads, dashboard
+  - GM: access only to their assigned stores — can upload, assign flags, view meetings/flags within their stores
+  - Manager: read-only access to their stores, can only see flags assigned to them, can respond to own flags only, cannot upload/assign/escalate
+  - Unauthenticated: blocked from all endpoints except /health and /auth/callback
+- Updated all 133 existing API tests to use corporate auth headers (zero regressions)
+- 48 new RBAC tests covering corporate/gm/manager/unauthenticated access patterns
+- 455 total tests passing (393 unit/API + integration)
+- Phase 2 COMPLETE

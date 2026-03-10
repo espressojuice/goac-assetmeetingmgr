@@ -14,10 +14,12 @@ from app.api.schemas import (
     FlagResponse,
     FlagStatsResponse,
 )
+from app.auth import get_current_user
 from app.database import get_db
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
 from app.models.meeting import Meeting
 from app.models.store import Store
+from app.models.user import User, UserRole
 from app.models.inventory import NewVehicleInventory, UsedVehicleInventory, ServiceLoaner, FloorplanReconciliation
 from app.models.parts import PartsInventory, PartsAnalysis
 from app.models.financial import Receivable, FIChargeback, ContractInTransit, Prepaid, PolicyAdjustment
@@ -26,7 +28,10 @@ from app.models.operations import OpenRepairOrder, WarrantyClaim, MissingTitle, 
 router = APIRouter()
 
 
-async def _get_meeting(meeting_id: str, db: AsyncSession) -> Meeting:
+async def _get_meeting_with_access(
+    meeting_id: str, current_user: User, db: AsyncSession
+) -> Meeting:
+    """Fetch meeting and verify store access."""
     try:
         meeting_uuid = uuid.UUID(meeting_id)
     except ValueError:
@@ -36,22 +41,36 @@ async def _get_meeting(meeting_id: str, db: AsyncSession) -> Meeting:
     meeting = result.scalar_one_or_none()
     if not meeting:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+
+    if current_user.role != UserRole.CORPORATE:
+        from app.auth import _user_has_store_access
+        if not await _user_has_store_access(current_user.id, meeting.store_id, db):
+            raise HTTPException(status_code=403, detail="You do not have access to this meeting's store")
+
     return meeting
 
 
 @router.get("/packets/{meeting_id}")
-async def get_packet(meeting_id: str, db: AsyncSession = Depends(get_db)):
+async def get_packet(
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Return the generated packet PDF for a meeting."""
-    meeting = await _get_meeting(meeting_id, db)
+    meeting = await _get_meeting_with_access(meeting_id, current_user, db)
     if not meeting.packet_url:
         raise HTTPException(status_code=404, detail="Packet not yet generated")
     return FileResponse(meeting.packet_url, media_type="application/pdf", filename="packet.pdf")
 
 
 @router.get("/packets/{meeting_id}/flagged-items")
-async def get_flagged_items(meeting_id: str, db: AsyncSession = Depends(get_db)):
+async def get_flagged_items(
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Return the flagged items report PDF for a meeting."""
-    meeting = await _get_meeting(meeting_id, db)
+    meeting = await _get_meeting_with_access(meeting_id, current_user, db)
     if not meeting.flagged_items_url:
         raise HTTPException(status_code=404, detail="Flagged items report not yet generated")
     return FileResponse(
@@ -61,13 +80,15 @@ async def get_flagged_items(meeting_id: str, db: AsyncSession = Depends(get_db))
 
 @router.get("/packets/{meeting_id}/summary", response_model=MeetingSummaryResponse)
 async def get_meeting_summary(
-    meeting_id: str, db: AsyncSession = Depends(get_db)
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> MeetingSummaryResponse:
     """
     Return JSON summary of a meeting's parsed data and flags.
     Used by the frontend to render the web view.
     """
-    meeting = await _get_meeting(meeting_id, db)
+    meeting = await _get_meeting_with_access(meeting_id, current_user, db)
 
     # Get store
     store_result = await db.execute(select(Store).where(Store.id == meeting.store_id))

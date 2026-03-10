@@ -23,7 +23,7 @@ from app.models.operations import (
     SlowToAccounting,
 )
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStore
 from app.models.accountability import (
     FlagAssignment,
     FlagResponseRecord,
@@ -68,6 +68,7 @@ __all__ = [
     # Users & Auth
     "User",
     "UserRole",
+    "UserStore",
     # Accountability
     "FlagAssignment",
     "FlagResponseRecord",
