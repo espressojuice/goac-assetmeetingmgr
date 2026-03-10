@@ -41,3 +41,8 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Deployment
+.env.prod
+backups/
+deploy/secrets/

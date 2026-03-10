@@ -94,6 +94,24 @@
 
 ## Phase 2 COMPLETE
 
+# Deployment Tasks
+
+- [x] Production Docker Compose (db, api, frontend, caddy, backup)
+- [x] Caddyfile reverse proxy (auto-HTTPS via Let's Encrypt)
+- [x] Backend Dockerfile (Python 3.11-slim + system deps)
+- [x] Frontend Dockerfile (multi-stage: deps → build → runner)
+- [x] next.config.js standalone output (already configured)
+- [x] GitHub Actions CI/CD (test → deploy via SSH)
+- [x] Server setup script (Docker, deploy user, UFW, fail2ban, SSH hardening)
+- [x] Deploy scripts (deploy, migrate, logs, backup-now, restore)
+- [x] .env.example with all required variables
+- [x] .gitignore updated (backups, deploy/secrets, .env.prod)
+- [x] README deployment section
+- [ ] Provision Hetzner VPS (manual)
+- [ ] Configure DNS A record (manual)
+- [ ] Set up Google OAuth for production domain (manual)
+- [ ] First production deploy (manual)
+
 ## Session Log
 
 ### Session 7 — 2026-03-09 (Phase 2 Foundation)
@@ -169,3 +187,13 @@
 - 48 new RBAC tests covering corporate/gm/manager/unauthenticated access patterns
 - 455 total tests passing (393 unit/API + integration)
 - Phase 2 COMPLETE
+
+### Session 13 — 2026-03-09 (Deployment Infrastructure)
+- Created production Docker Compose with 5 services: db (postgres:16-alpine), api, frontend, caddy (auto-HTTPS), backup (daily with 7-day retention)
+- Caddyfile reverse proxy: /api/* → api:8000, /health → api:8000, * → frontend:3000
+- Backend Dockerfile: python:3.11-slim with build-essential, libpq-dev, poppler-utils
+- Frontend Dockerfile: multi-stage build (deps → builder → runner) ~150MB vs ~1GB
+- GitHub Actions: test job (postgres service, pytest) → deploy job (SSH to VPS)
+- Server setup script: Docker install, deploy user, UFW firewall, fail2ban, SSH hardening
+- 6 deploy scripts: setup-server, deploy, migrate, logs, backup-now, restore
+- .env.example with all 10 required environment variables

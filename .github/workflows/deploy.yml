@@ -1,0 +1,67 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: goac_test
+          POSTGRES_USER: goac
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://goac:testpass@localhost:5432/goac_test
+          JWT_SECRET_KEY: test-secret-key
+        run: python -m pytest tests/ -v --tb=short
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy to production
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script: |
+            cd /home/deploy/goac-assetmeetingmgr
+            git pull origin main
+            docker compose -f docker-compose.prod.yml build
+            docker compose -f docker-compose.prod.yml up -d
+            sleep 10
+            curl -f http://localhost:8000/health

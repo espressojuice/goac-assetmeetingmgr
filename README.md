@@ -273,6 +273,69 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 | POST | `/api/v1/notifications/read-all` | Mark all notifications as read |
 | GET | `/api/v1/notifications/unread-count` | Get unread notification count |
 
+## Deployment
+
+### Prerequisites
+- **Server**: Hetzner CX21 (2 vCPU, 4GB RAM, 40GB SSD) or equivalent
+- **Domain**: DNS A record pointing to server IP
+- **Google OAuth**: Credentials configured for your domain
+- **SendGrid API key** (optional — emails are logged when not set)
+
+### First-Time Setup
+
+```bash
+# 1. Run server setup (as root on fresh Ubuntu 22.04)
+scp deploy/setup-server.sh root@your-server:/tmp/
+ssh root@your-server 'bash /tmp/setup-server.sh'
+
+# 2. SSH as deploy user
+ssh deploy@your-server
+
+# 3. Configure environment
+cd /home/deploy/goac-assetmeetingmgr
+cp .env.example .env
+nano .env  # Fill in all secrets
+
+# 4. Start services
+docker compose -f docker-compose.prod.yml up -d
+
+# 5. Run database migrations
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
+```
+
+Caddy handles HTTPS automatically via Let's Encrypt — just point your domain's DNS A record to the server IP.
+
+### Ongoing Deploys
+
+Push to `main` triggers GitHub Actions: runs tests → deploys via SSH.
+
+Manual deploy: `ssh deploy@your-server 'bash /home/deploy/goac-assetmeetingmgr/deploy/deploy.sh'`
+
+### Useful Commands
+
+```bash
+# View logs (all services or specific)
+deploy/logs.sh
+deploy/logs.sh api
+
+# Run migrations
+deploy/migrate.sh
+
+# Manual backup
+deploy/backup-now.sh
+
+# Restore from backup
+deploy/restore.sh backups/backup_20260309_120000.sql.gz
+```
+
+### GitHub Actions Secrets
+
+Set these in your repo's Settings → Secrets:
+- `DEPLOY_HOST` — Server IP address
+- `DEPLOY_USER` — `deploy`
+- `DEPLOY_SSH_KEY` — Private SSH key for deploy user
+- `DEPLOY_PORT` — SSH port (default 22)
+
 ## Phase 1 Deliverables
 
 - [x] PostgreSQL data models for all report categories
@@ -350,3 +413,5 @@ cd backend && python3 -m pytest tests/ -v
 **Phase 1 COMPLETE.** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).
 
 **Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 455 tests passing.
+
+**Deployment Infrastructure READY.** Production Docker Compose with Caddy (auto-HTTPS), GitHub Actions CI/CD (test → deploy), automated daily backups with 7-day retention, server hardening script (UFW + fail2ban + SSH lockdown).

@@ -36,3 +36,4 @@
 - **2026-03-09**: When adding auth to existing routes, default test fixtures to corporate role for backward compatibility. Add role-specific tests separately in a dedicated RBAC test file. Never break green tests.
 - **2026-03-09**: Store-scoped access control needs a UserStore join table — can't rely on role alone when GMs/managers may manage multiple stores. Corporate bypasses all store checks. Use `get_user_store_ids()` for list endpoints and `_user_has_store_access()` for single-resource endpoints.
 - **2026-03-09**: Manager role needs special handling for flags: they should only see flags assigned to them (subquery filter on FlagAssignment.assigned_to_id), not all flags for their store's meetings.
+- **2026-03-09**: Caddy handles HTTPS automatically via Let's Encrypt — zero cert management. Just point DNS to the server and Caddy does the rest. Multi-stage Docker build for Next.js with output: 'standalone' reduces image size from ~1GB to ~150MB.
