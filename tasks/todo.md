@@ -96,19 +96,18 @@
 
 # Deployment Tasks
 
-- [x] Production Docker Compose (db, api, frontend, caddy, backup)
-- [x] Caddyfile reverse proxy (auto-HTTPS via Let's Encrypt)
+- [x] Production Docker Compose (db, api, frontend, backup — Traefik labels)
 - [x] Backend Dockerfile (Python 3.11-slim + system deps)
 - [x] Frontend Dockerfile (multi-stage: deps → build → runner)
 - [x] next.config.js standalone output (already configured)
 - [x] GitHub Actions CI/CD (test → deploy via SSH)
-- [x] Server setup script (Docker, deploy user, UFW, fail2ban, SSH hardening)
+- [x] Server setup script (Docker check, swap, web network, /opt/ convention)
 - [x] Deploy scripts (deploy, migrate, logs, backup-now, restore)
 - [x] .env.example with all required variables
 - [x] .gitignore updated (backups, deploy/secrets, .env.prod)
 - [x] README deployment section
-- [ ] Provision Hetzner VPS (manual)
-- [ ] Configure DNS A record (manual)
+- [x] Refactored from Caddy to Traefik (existing VPS reverse proxy)
+- [ ] Configure DNS A record for assetmeeting.goac.io (manual)
 - [ ] Set up Google OAuth for production domain (manual)
 - [ ] First production deploy (manual)
 
@@ -197,3 +196,16 @@
 - Server setup script: Docker install, deploy user, UFW firewall, fail2ban, SSH hardening
 - 6 deploy scripts: setup-server, deploy, migrate, logs, backup-now, restore
 - .env.example with all 10 required environment variables
+
+### Session 14 — 2026-03-10 (Traefik Migration)
+- Replaced Caddy with Traefik labels for existing Hetzner VPS (5.161.71.87)
+- Server already runs Traefik v2.11 on "web" Docker network with auto-HTTPS
+- Removed Caddyfile and caddy service from docker-compose.prod.yml
+- Added Traefik labels to api (priority 2, /api path) and frontend (priority 1, catch-all)
+- Both api and frontend join "web" (external) + "default" (internal) networks
+- db and backup stay on default network only, no host port bindings
+- Updated all deploy scripts to use /opt/assetmeetinghelper/ (server convention)
+- Added 2GB swap creation to setup-server.sh for OCR memory spikes
+- Setup script now checks for existing Docker, deploy user, UFW, web network
+- Domain: assetmeeting.goac.io
+- Health check changed from localhost curl to docker exec (no exposed ports)

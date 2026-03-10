@@ -275,25 +275,34 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 
 ## Deployment
 
+Deployed to **assetmeeting.goac.io** on an existing Hetzner VPS (5.161.71.87) running Ubuntu 24.04. The server uses **Traefik v2.11** as a shared reverse proxy with automatic HTTPS via Let's Encrypt. Other apps on the same server (greggorr.com, ctrl.goac.io, ocrmypdf.goac.io) all share Traefik. Apps are deployed to `/opt/{project-name}/`.
+
 ### Prerequisites
-- **Server**: Hetzner CX21 (2 vCPU, 4GB RAM, 40GB SSD) or equivalent
-- **Domain**: DNS A record pointing to server IP
-- **Google OAuth**: Credentials configured for your domain
+- **Server**: Hetzner VPS with Docker, Traefik, and the `web` Docker network already configured
+- **Domain**: DNS A record for `assetmeeting.goac.io` pointing to server IP
+- **Google OAuth**: Credentials configured for assetmeeting.goac.io
 - **SendGrid API key** (optional — emails are logged when not set)
+
+### Architecture
+- **Traefik** (shared, already running) handles HTTPS termination and routing via Docker labels
+- **api** container: `/api/*` routes → FastAPI on port 8000 (priority 2)
+- **frontend** container: all other routes → Next.js on port 3000 (priority 1)
+- **db** container: PostgreSQL 16 (internal network only, no host port)
+- **backup** container: daily pg_dump with 7-day retention
+- 2GB swap configured as safety net for OCR memory spikes
 
 ### First-Time Setup
 
 ```bash
-# 1. Run server setup (as root on fresh Ubuntu 22.04)
-scp deploy/setup-server.sh root@your-server:/tmp/
-ssh root@your-server 'bash /tmp/setup-server.sh'
+# 1. Run server setup (as root)
+scp deploy/setup-server.sh root@5.161.71.87:/tmp/
+ssh root@5.161.71.87 'bash /tmp/setup-server.sh'
 
 # 2. SSH as deploy user
-ssh deploy@your-server
+ssh deploy@5.161.71.87
 
 # 3. Configure environment
-cd /home/deploy/goac-assetmeetingmgr
-cp .env.example .env
+cd /opt/assetmeetinghelper
 nano .env  # Fill in all secrets
 
 # 4. Start services
@@ -303,13 +312,13 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 ```
 
-Caddy handles HTTPS automatically via Let's Encrypt — just point your domain's DNS A record to the server IP.
+Traefik automatically provisions HTTPS via Let's Encrypt — just ensure the DNS A record for `assetmeeting.goac.io` points to the server.
 
 ### Ongoing Deploys
 
 Push to `main` triggers GitHub Actions: runs tests → deploys via SSH.
 
-Manual deploy: `ssh deploy@your-server 'bash /home/deploy/goac-assetmeetingmgr/deploy/deploy.sh'`
+Manual deploy: `ssh deploy@5.161.71.87 'bash /opt/assetmeetinghelper/deploy/deploy.sh'`
 
 ### Useful Commands
 
@@ -331,7 +340,7 @@ deploy/restore.sh backups/backup_20260309_120000.sql.gz
 ### GitHub Actions Secrets
 
 Set these in your repo's Settings → Secrets:
-- `DEPLOY_HOST` — Server IP address
+- `DEPLOY_HOST` — `5.161.71.87`
 - `DEPLOY_USER` — `deploy`
 - `DEPLOY_SSH_KEY` — Private SSH key for deploy user
 - `DEPLOY_PORT` — SSH port (default 22)
@@ -414,4 +423,4 @@ cd backend && python3 -m pytest tests/ -v
 
 **Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 455 tests passing.
 
-**Deployment Infrastructure READY.** Production Docker Compose with Caddy (auto-HTTPS), GitHub Actions CI/CD (test → deploy), automated daily backups with 7-day retention, server hardening script (UFW + fail2ban + SSH lockdown).
+**Deployment Infrastructure READY.** Production Docker Compose with Traefik (auto-HTTPS via existing reverse proxy), GitHub Actions CI/CD (test → deploy), automated daily backups with 7-day retention. Deployed to assetmeeting.goac.io on Hetzner VPS at /opt/assetmeetinghelper/.

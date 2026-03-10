@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd /home/deploy/goac-assetmeetingmgr
+cd /opt/assetmeetinghelper
 
 echo "=== Pulling latest code ==="
 git pull origin main
@@ -19,7 +19,7 @@ echo "=== Waiting for startup ==="
 sleep 10
 
 echo "=== Health check ==="
-curl -f http://localhost:8000/health
+docker compose -f docker-compose.prod.yml exec -T api curl -f http://localhost:8000/health
 
 echo ""
 echo "=== Deploy complete ==="

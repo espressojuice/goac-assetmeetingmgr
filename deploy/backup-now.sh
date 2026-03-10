@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd /home/deploy/goac-assetmeetingmgr
+cd /opt/assetmeetinghelper
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="backups/backup_${TIMESTAMP}.sql.gz"

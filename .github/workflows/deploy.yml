@@ -59,9 +59,9 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           script: |
-            cd /home/deploy/goac-assetmeetingmgr
+            cd /opt/assetmeetinghelper
             git pull origin main
             docker compose -f docker-compose.prod.yml build
             docker compose -f docker-compose.prod.yml up -d
             sleep 10
-            curl -f http://localhost:8000/health
+            docker compose -f docker-compose.prod.yml exec -T api curl -f http://localhost:8000/health

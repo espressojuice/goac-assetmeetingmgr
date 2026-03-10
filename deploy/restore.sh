@@ -22,7 +22,7 @@ if [ "$CONFIRM" != "yes" ]; then
     exit 0
 fi
 
-cd /home/deploy/goac-assetmeetingmgr
+cd /opt/assetmeetinghelper
 
 echo "=== Restoring database ==="
 gunzip -c "$BACKUP_FILE" | docker compose -f docker-compose.prod.yml exec -T db psql -U "${DB_USER:-goac}" "${DB_NAME:-goac}"
