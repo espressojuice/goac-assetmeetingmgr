@@ -116,6 +116,9 @@
 - [ ] Set up GitHub Actions secrets for CI/CD (DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PORT)
 - [ ] Kernel upgrade reboot on VPS
 - [ ] Test end-to-end login flow (Google OAuth → dashboard)
+- [ ] Create Hetzner Object Storage bucket and configure S3 credentials
+- [ ] Tune packet validator keywords against real packets (25% avg detection rate)
+- [ ] Set up GitHub Actions secrets for CI/CD
 - [x] Create initial store records in database (23 stores seeded)
 - [x] Promote Bryan Brookes to corporate role
 - [x] Upload test packet PDFs to server (17 files)
