@@ -38,7 +38,7 @@ services:
       - web
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.goac-api.rule=Host(`assetmeeting.goac.io`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.goac-api.rule=Host(`assetmeeting.goac.io`) && PathPrefix(`/api/v1`)"
       - "traefik.http.routers.goac-api.entrypoints=websecure"
       - "traefik.http.routers.goac-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.goac-api.loadbalancer.server.port=8000"
