@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -15,6 +16,13 @@ config = context.config
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override sqlalchemy.url from DATABASE_URL env var if set
+# Convert asyncpg:// to psycopg2:// for sync Alembic migrations
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+    config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 
