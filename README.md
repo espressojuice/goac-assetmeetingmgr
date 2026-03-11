@@ -285,7 +285,7 @@ Deployed to **assetmeeting.goac.io** on an existing Hetzner VPS (5.161.71.87) ru
 
 ### Architecture
 - **Traefik** (shared, already running) handles HTTPS termination and routing via Docker labels
-- **api** container: `/api/*` routes → FastAPI on port 8000 (priority 2)
+- **api** container: `/api/v1/*` routes → FastAPI on port 8000 (priority 2)
 - **frontend** container: all other routes → Next.js on port 3000 (priority 1)
 - **db** container: PostgreSQL 16 (internal network only, no host port)
 - **backup** container: daily pg_dump with 7-day retention
@@ -423,4 +423,4 @@ cd backend && python3 -m pytest tests/ -v
 
 **Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 455 tests passing.
 
-**Deployment Infrastructure READY.** Production Docker Compose with Traefik (auto-HTTPS via existing reverse proxy), GitHub Actions CI/CD (test → deploy), automated daily backups with 7-day retention. Deployed to assetmeeting.goac.io on Hetzner VPS at /opt/assetmeetinghelper/.
+**Production LIVE at https://assetmeeting.goac.io.** Deployed on Hetzner VPS (5.161.71.87) alongside greggorr.com, ctrl.goac.io, and ocrmypdf.goac.io — all sharing Traefik v2.11 for routing and auto-HTTPS. Docker Compose with 4 containers (PostgreSQL, FastAPI, Next.js, backup). Google OAuth configured (Google Workspace, Internal). SendGrid domain-authenticated for goac.io. GitHub Actions CI/CD pipeline ready (secrets need configuring). Automated daily backups with 7-day retention.

@@ -107,9 +107,16 @@
 - [x] .gitignore updated (backups, deploy/secrets, .env.prod)
 - [x] README deployment section
 - [x] Refactored from Caddy to Traefik (existing VPS reverse proxy)
-- [ ] Configure DNS A record for assetmeeting.goac.io (manual)
-- [ ] Set up Google OAuth for production domain (manual)
-- [ ] First production deploy (manual)
+- [x] Configure DNS A record for assetmeeting.goac.io
+- [x] Set up Google OAuth for production domain (Google Workspace, Internal)
+- [x] Set up SendGrid with domain authentication for goac.io
+- [x] First production deploy — all 4 containers running, TLS working
+- [x] Fixed deployment issues: missing package-lock.json, frontend/public/.gitkeep, Alembic DATABASE_URL, tzdata for US/Central
+- [x] Fixed Traefik routing: PathPrefix(/api) → PathPrefix(/api/v1) so NextAuth /api/auth/* reaches Next.js
+- [ ] Set up GitHub Actions secrets for CI/CD (DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PORT)
+- [ ] Kernel upgrade reboot on VPS
+- [ ] Test end-to-end login flow (Google OAuth → dashboard)
+- [ ] Create initial store records in database
 
 ## Session Log
 
@@ -209,3 +216,17 @@
 - Setup script now checks for existing Docker, deploy user, UFW, web network
 - Domain: assetmeeting.goac.io
 - Health check changed from localhost curl to docker exec (no exposed ports)
+
+### Session 15 — 2026-03-10 (Production Deploy + Fixes)
+- Successfully deployed to https://assetmeeting.goac.io — all 4 containers running (PostgreSQL, FastAPI, Next.js, backup)
+- TLS working via Traefik/Let's Encrypt, no exposed host ports
+- Fixed 4 deployment issues:
+  - Frontend Dockerfile: handle missing package-lock.json gracefully
+  - Added frontend/public/.gitkeep for Next.js build
+  - Alembic env.py: use DATABASE_URL env var instead of hardcoded localhost
+  - Added tzdata package for US/Central timezone in scheduler
+- Fixed Traefik routing: changed PathPrefix(/api) → PathPrefix(/api/v1) so NextAuth /api/auth/* routes reach Next.js instead of FastAPI returning 404
+- Set up Google OAuth under Google Workspace (Internal) for assetmeeting.goac.io
+- Set up SendGrid with domain authentication for goac.io
+- Configured DNS A record for assetmeeting.goac.io → 5.161.71.87
+- Server runs alongside greggorr.com, ctrl.goac.io, ocrmypdf.goac.io on shared Traefik
