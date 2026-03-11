@@ -147,7 +147,7 @@
 ## Task 5: Tests + Commit
 - [x] Run all tests — 459 passing, 0 failures
 - [x] Update todo.md, lessons.md, README.md
-- [ ] Commit and push
+- [x] Commit and push (3cfa8a2)
 
 ## Session Log
 
