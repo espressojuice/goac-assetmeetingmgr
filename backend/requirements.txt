@@ -11,6 +11,8 @@ reportlab
 python-dateutil
 httpx
 pytest
+pytest-asyncio
+aiosqlite
 asyncpg
 authlib
 python-jose[cryptography]
@@ -19,3 +21,5 @@ sendgrid
 apscheduler
 tzdata
 boto3
+easyocr
+pypdfium2

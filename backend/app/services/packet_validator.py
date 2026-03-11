@@ -53,6 +53,10 @@ def _register(
     ))
 
 
+# Helper: OCR-tolerant schedule number pattern.  Matches both pdfplumber
+# "SCHEDULE 237" and OCR "Schedule#: 237" / "Schedule#  237" forms.
+_SCH = r"(?:SCHEDULE|Schedule)\s*#?\s*:?\s*"
+
 # 1. Reynolds Employee List
 # Real packets show employee names with job titles (SALES, TECH, SERVICE MANAGER)
 # without a formal "Employee List" header.
@@ -62,91 +66,105 @@ _register(1, "Reynolds Employee List",
            r"(?:SALES|TECH|SERVICE\s+(?:ADVISOR|MANAGER)|WASH\s+BAY|LUBE\s+TECH|FI\s+MANAGER)\s*\n"])
 
 # 2. Parts 2213
+# OCR renders as "MONTHLY AMALISIS 2213" or "MONTHLY MALYSIS 2213"
 _register(2, "Parts 2213",
           "Reynolds -> Reports -> 2213 Parts Inventory",
-          [r"\b2213\b", r"PARTS\s+INVENTORY"])
+          [r"\b2213\b", r"PARTS\s+INVENTORY", r"MONTHLY\s+[A-Z]*LYSIS\s+2213"])
 
 # 3. Parts 2222
 _register(3, "Parts 2222",
           "Reynolds -> Reports -> 2222 Parts Analysis",
-          [r"\b2222\b", r"PARTS\s+ANALYSIS", r"MONTHLY\s+ANALYSIS",
+          [r"\b2222\b", r"PARTS\s+ANALYSIS", r"MONTHLY\s+[A-Z]*LYSIS",
            r"STORE\s+\d+\s+BRANCH"])
 
-# 4. Service and Parts Receivables
+# 4. Service and Parts Receivables (Schedule 200)
+# OCR: "Schedule#: 200 ACCOUNTS RECEIVABLE"
 _register(4, "Service and Parts Receivables",
-          "Reynolds -> Schedule Summary -> Service & Parts",
+          "Reynolds -> Schedule Summary -> Service & Parts (Sch 200)",
           [r"SERVICE.*RECEIVABLE", r"PARTS?\s+RECEIVABLE",
-           r"SCHEDULE\s+SUMMARY.*(?:SERVICE|PARTS)",
-           r"P\s*&\s*S\s*\(\s*200\s*\)"])
+           r"ACCOUNTS?\s+RECEIVABLE",
+           r"P\s*&\s*S\s*\(\s*200\s*\)",
+           _SCH + r"200\b"],
+          negative=[r"CONTRACT.*IN\s+TRANSIT", r"\bCIT\b"])
 
-# 5. Warranty Claims
+# 5. Warranty Claims (Schedule 263)
+# OCR: "263 WARR CLAIMS-GM 263"
 _register(5, "Warranty Claims",
           "Reynolds -> Schedule Summary -> Warranty Claims",
-          [r"WARRANTY.*CLAIM", r"SCHEDULE\s+263\b", r"WARRANTY"])
+          [r"WARR.*CLAIM", r"WARRANTY.*CLAIM", _SCH + r"263\b",
+           r"\b263\b.*(?:WARR|WARRANTY)"])
 
 # 6. Open RO List (3617)
+# OCR: "Open ROs" with detail lines
 _register(6, "Open RO List (3617)",
           "Reynolds -> Reports -> 3617 Open RO List",
-          [r"\b3617\b", r"OPEN\s+R\.?O\.?", r"REPAIR\s+ORDER"])
+          [r"\b3617\b", r"OPEN\s+R\.?O", r"REPAIR\s+ORDER"])
 
-# 7. Loaner Inventory
-# Real packets reference "SRV LOANERS (277)" on summary pages.
+# 7. Loaner Inventory (Schedule 277)
+# OCR: "Schedule#: 277 LOANERS"
 _register(7, "Loaner Inventory",
           "Reynolds -> Schedule Summary -> Loaner Inventory",
-          [r"SERVICE?\s+LOANER", r"SRV\s+LOANER", r"LOANER\s+INVENTOR",
-           r"SCHEDULE\s+277\b", r"\(277\)"])
+          [r"SERVICE?\s+LOANER", r"SRV\s+LOANER", r"LOANER",
+           _SCH + r"277\b", r"\(277\)", r"\b277\b.*LOANER"])
 
 # 8. GL 0504 New & Used — must NOT contain chargeback keywords
+# OCR: "CLASSIC CHEVROLET 0504" + "GL INQUIRY"
 _register(8, "GL 0504 New & Used",
           "Reynolds -> GL -> 0504 -> New & Used",
           [r"(?:GL|GENERAL\s+LEDGER).*0504", r"\b0504\b.*(?:NEW|USED)",
-           r"\b0504\b"],
-          negative=[r"CHARGEBACK", r"F\s*&\s*I\s+CHARGEBACK"])
+           r"\b0504\b", r"GL\s+INQUIRY.*0504"],
+          negative=[r"CHARGEBACK", r"F\s*&?\s*I\s+CHARGEBACK"])
 
-# 9. New Inventory
-# Real packets: "NEW (237)" on summary pages.
+# 9. New Inventory (Schedule 237)
+# OCR: "Schedule#: 237 NEW VEH INVENTORY 231-237"
 _register(9, "New Inventory",
           "Reynolds -> Schedule Summary -> New Inventory (Sch 237)",
-          [r"NEW\s+VEHICLE", r"NEW\s+CAR", r"SCHEDULE\s+237\b",
-           r"NEW\s*\(\s*237\s*\)", r"\(237\)"])
+          [r"NEW\s+VEH", r"NEW\s+VEHICLE", r"NEW\s+CAR",
+           _SCH + r"237\b", r"NEW\s*\(\s*237\s*\)", r"\(237\)",
+           r"\b237\b.*NEW\s+VEH"])
 
-# 10. Used Inventory
-# Real packets: "USED (240)" on summary pages.
+# 10. Used Inventory (Schedule 240)
+# OCR: "Schedule#: 240 USED VEHICLE INVENTORY"
 _register(10, "Used Inventory",
            "Reynolds -> Schedule Summary -> Used Inventory (Sch 240)",
-           [r"USED\s+VEHICLE", r"USED\s+CAR", r"SCHEDULE\s+240\b",
-            r"USED\s*\(\s*240\s*\)", r"\(240\)"])
+           [r"USED\s+VEH", r"USED\s+VEHICLE", r"USED\s+CAR",
+            _SCH + r"240\b", r"USED\s*\(\s*240\s*\)", r"\(240\)",
+            r"\b240\b.*USED\s+VEH"])
 
 # 11. Wholesale Deals in Range — requires "DEAL" or date-range context
+# OCR: "WHOLESALE DEALS IN A DATE RANGE"
 _register(11, "Wholesale Deals in Range",
            "Reynolds -> Dynamic Reporting -> Wholesale Deals",
-           [r"WHOLESALE\s+DEAL", r"WHOLESALE.*(?:RANGE|FROM|THRU|THROUGH)"],
-           negative=[r"SCHEDULE\s+SUMMARY"])
+           [r"WHOLESALE\s+DEAL", r"WHOLESALE.*(?:RANGE|FROM|THRU|THROUGH|DATE)"],
+           negative=[r"Schedule\s*#?\s*:?\s*\d+\s+WHOLESALE"])
 
 # 12. GL 0504 Chargebacks — requires chargeback context
+# OCR: "0504" + "CHARGEBACK" on same page
 _register(12, "GL 0504 Chargebacks",
            "Reynolds -> GL -> 0504 -> Chargebacks",
            [r"CHARGEBACK.*0504", r"0504.*CHARGEBACK",
-            r"F\s*&\s*I\s+CHARGEBACK", r"CHARGEBACK"])
+            r"F\s*&?\s*I\s+CHARGEBACK", r"CHARGEBACK"])
 
-# 13. Contracts in Transit
+# 13. Contracts in Transit (Schedule 205)
+# OCR: "Schedule#: 205 CONTRACTS IN TRANSIT"
 _register(13, "Contracts in Transit",
-           "Reynolds -> Schedule Summary -> CIT (Sch 200)",
-           [r"CONTRACT\S?\s+IN\s+TRANSIT", r"\bCIT\b", r"SCHEDULE\s+200\b",
-            r"\(\s*200\s*\)"])
+           "Reynolds -> Schedule Summary -> CIT (Sch 205)",
+           [r"CONTRACT\S?\s+IN\s+TRANSIT", r"\bCIT\b",
+            _SCH + r"205\b", r"\(\s*205\s*\)"])
 
 # 14. Slow to Accounting
+# OCR: "SLOW TO ACCOUNTING"
 _register(14, "Slow to Accounting",
            "Reynolds -> Reports -> Slow to Accounting",
            [r"SLOW[\s-]+TO[\s-]+ACCOUNTING"])
 
-# 15. Wholesales (schedule summary) — broader wholesale without "DEAL"
-# Real packets: "WHOLEASALE (220)" (OCR typo) on summary pages.
+# 15. Wholesales (schedule summary, Sch 220) — broader wholesale without "DEAL"
+# OCR: "Schedule#: 220 WHOLESALES 220A"
 _register(15, "Wholesales",
-           "Reynolds -> Schedule Summary -> Wholesales",
+           "Reynolds -> Schedule Summary -> Wholesales (Sch 220)",
            [r"WHOL[EA]SALE", r"SCHEDULE\s+SUMMARY.*WHOLESALE",
-            r"\(\s*220\s*\)"],
-           negative=[r"WHOLESALE\s+DEAL", r"WHOLESALE.*(?:RANGE|FROM|THRU|THROUGH)"])
+            _SCH + r"220\b", r"\(\s*220\s*\)"],
+           negative=[r"WHOLESALE\s+DEAL", r"WHOLESALE.*(?:RANGE|FROM|THRU|THROUGH|DATE)"])
 
 # 16. Missing Titles
 _register(16, "Missing Titles",
@@ -295,22 +313,67 @@ class PacketValidator:
             total_pages=total_pages,
         )
 
+    # Minimum characters from pdfplumber before triggering OCR fallback
+    _OCR_THRESHOLD = 50
+
     def _extract_text(self, source: Union[str, bytes, Path]) -> list[str]:
-        """Extract text from each page of the PDF using pdfplumber."""
+        """Extract text from each page of the PDF, with OCR fallback for scanned pages."""
+        import os
+        import tempfile
+
+        from app.parsers.pdf_extractor import (
+            _build_text_and_tables,
+            _is_landscape_content,
+            _ocr_page_detailed,
+        )
+
         pages_text: list[str] = []
+        tmp_path: str | None = None
+        created_tmp = False
+
         try:
             if isinstance(source, bytes):
                 import io
+
                 pdf_file = io.BytesIO(source)
+                # Write to temp file for OCR fallback
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                    f.write(source)
+                    tmp_path = f.name
+                    created_tmp = True
             else:
                 pdf_file = str(source)
+                tmp_path = str(source)
 
             with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
+                for i, page in enumerate(pdf.pages):
                     text = page.extract_text() or ""
+
+                    # OCR fallback for blank/near-blank pages
+                    if len(text.strip()) < self._OCR_THRESHOLD and tmp_path:
+                        ocr_results = _ocr_page_detailed(tmp_path, i)
+
+                        if _is_landscape_content(ocr_results):
+                            ocr_rotated = _ocr_page_detailed(tmp_path, i, rotation=90)
+                            if not _is_landscape_content(ocr_rotated) and len(ocr_rotated) > 0:
+                                ocr_results = ocr_rotated
+
+                        ocr_text, _ = _build_text_and_tables(ocr_results)
+                        if ocr_text and len(ocr_text.strip()) > len(text.strip()):
+                            text = ocr_text
+                            logger.info(
+                                "Page %d: used OCR fallback (%d chars)", i + 1, len(text)
+                            )
+
                     pages_text.append(text)
         except Exception:
             logger.warning("Failed to extract text from PDF", exc_info=True)
+        finally:
+            if created_tmp and tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
         return pages_text
 
