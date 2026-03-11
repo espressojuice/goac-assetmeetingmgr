@@ -46,3 +46,6 @@ htmlcov/
 .env.prod
 backups/
 deploy/secrets/
+
+# Secrets reference
+Secrets.md
