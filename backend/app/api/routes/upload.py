@@ -1,4 +1,4 @@
-"""Upload routes — PDF upload and processing."""
+"""Upload routes — PDF upload (validate-only) and approve (process)."""
 
 from __future__ import annotations
 
@@ -10,13 +10,22 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import UploadResponse, BulkUploadResponse
-from app.auth import get_current_user, require_corporate_or_gm, verify_store_access
+from app.api.schemas import (
+    ApproveResponse,
+    ValidationUploadResponse,
+)
+from app.auth import (
+    _user_has_store_access,
+    get_current_user,
+    require_corporate_or_gm,
+    verify_store_access,
+)
 from app.config import settings
 from app.database import get_db
 from app.models.meeting import Meeting, MeetingStatus
 from app.models.store import Store
 from app.models.user import User, UserRole
+from app.services.packet_validator import PacketValidator
 from app.services.processing_service import ProcessingService
 
 logger = logging.getLogger(__name__)
@@ -66,7 +75,7 @@ async def _get_or_create_meeting(
         meeting = Meeting(
             store_id=store_id,
             meeting_date=parsed_date,
-            status=MeetingStatus.PROCESSING,
+            status=MeetingStatus.PENDING,
         )
         db.add(meeting)
         await db.flush()
@@ -74,21 +83,9 @@ async def _get_or_create_meeting(
     return meeting
 
 
-@router.post("/upload", response_model=UploadResponse)
-async def upload_report(
-    file: UploadFile,
-    store_id: str = Form(...),
-    meeting_date: str = Form(...),
-    current_user: User = Depends(require_corporate_or_gm),
-    db: AsyncSession = Depends(get_db),
-) -> UploadResponse:
-    """
-    Upload an R&R report PDF for processing. Requires corporate or GM role.
-    GMs can only upload for their stores.
-    """
-    # Verify store access for non-corporate users
+async def _check_store_access(current_user: User, store_id: str, db: AsyncSession) -> None:
+    """Verify non-corporate users have access to the store."""
     if current_user.role != UserRole.CORPORATE:
-        from app.auth import _user_has_store_access
         try:
             store_uuid = uuid.UUID(store_id)
         except ValueError:
@@ -96,6 +93,21 @@ async def upload_report(
         if not await _user_has_store_access(current_user.id, store_uuid, db):
             raise HTTPException(status_code=403, detail="You do not have access to this store")
 
+
+@router.post("/upload", response_model=ValidationUploadResponse)
+async def upload_report(
+    file: UploadFile,
+    store_id: str = Form(...),
+    meeting_date: str = Form(...),
+    current_user: User = Depends(require_corporate_or_gm),
+    db: AsyncSession = Depends(get_db),
+) -> ValidationUploadResponse:
+    """
+    Upload an R&R report PDF for validation review.
+    Saves the file and runs packet validation only — does NOT process.
+    Call POST /upload/{meeting_id}/approve to trigger processing after review.
+    """
+    await _check_store_access(current_user, store_id, db)
     await _validate_pdf(file)
     store = await _get_store(store_id, db)
     meeting = await _get_or_create_meeting(store.id, meeting_date, db)
@@ -109,61 +121,40 @@ async def upload_report(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Process
+    # Run validation only (no processing)
     try:
-        service = ProcessingService()
-        result = service.process_upload(file_path, str(store.id), str(meeting.id), db)
-        # Handle both sync and async
-        if hasattr(result, "__await__"):
-            result = await result
-
-        # Validate packet completeness
-        validation_result = None
-        try:
-            from app.services.packet_validator import PacketValidator
-            validator = PacketValidator()
-            validation_result = validator.validate(file_path)
-        except Exception:
-            logger.warning("Packet validation failed", exc_info=True)
-
-        return UploadResponse(
-            meeting_id=str(meeting.id),
-            pages_extracted=result["pages_extracted"],
-            records_parsed=result["records_parsed"],
-            flags_generated=result["flags_generated"],
-            packet_url=result.get("packet_path"),
-            flagged_items_url=result.get("flagged_items_path"),
-            validation=validation_result,
-        )
+        validator = PacketValidator()
+        validation = validator.validate_detailed(file_path)
     except Exception as e:
-        logger.exception("Processing failed")
-        meeting.status = MeetingStatus.ERROR
-        meeting.notes = str(e)
-        await db.commit()
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        logger.exception("Packet validation failed")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+    # Keep meeting in PENDING status until approved
+    meeting.status = MeetingStatus.PENDING
+    await db.commit()
+
+    return ValidationUploadResponse(
+        meeting_id=str(meeting.id),
+        store_id=str(store.id),
+        total_pages=validation.total_pages,
+        validation=validation,
+    )
 
 
-@router.post("/upload/bulk", response_model=BulkUploadResponse)
+@router.post("/upload/bulk", response_model=ValidationUploadResponse)
 async def upload_bulk_reports(
     files: list[UploadFile],
     store_id: str = Form(...),
     meeting_date: str = Form(...),
     current_user: User = Depends(require_corporate_or_gm),
     db: AsyncSession = Depends(get_db),
-) -> BulkUploadResponse:
+) -> ValidationUploadResponse:
     """
     Upload multiple R&R report PDFs for the same meeting.
-    Requires corporate or GM role. GMs can only upload for their stores.
+    Saves files and runs validation only — does NOT process.
+    Call POST /upload/{meeting_id}/approve to trigger processing after review.
     """
-    # Verify store access for non-corporate users
-    if current_user.role != UserRole.CORPORATE:
-        from app.auth import _user_has_store_access
-        try:
-            store_uuid = uuid.UUID(store_id)
-        except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid store_id format")
-        if not await _user_has_store_access(current_user.id, store_uuid, db):
-            raise HTTPException(status_code=403, detail="You do not have access to this store")
+    await _check_store_access(current_user, store_id, db)
 
     if not files:
         raise HTTPException(status_code=422, detail="At least one file is required")
@@ -177,60 +168,109 @@ async def upload_bulk_reports(
     upload_dir = os.path.join(settings.UPLOAD_DIR, str(store.id), str(meeting.id))
     os.makedirs(upload_dir, exist_ok=True)
 
-    total_pages = 0
-    merged_records: dict[str, int] = {}
-    merged_flags = {"yellow": 0, "red": 0, "total": 0}
-    last_result = None
-
-    service = ProcessingService()
-
+    last_file_path = None
     for file in files:
         file_path = os.path.join(upload_dir, file.filename)
         content = await file.read()
         with open(file_path, "wb") as f:
             f.write(content)
+        last_file_path = file_path
 
+    # Validate the last uploaded file (primary packet)
+    try:
+        validator = PacketValidator()
+        validation = validator.validate_detailed(last_file_path)
+    except Exception as e:
+        logger.exception("Packet validation failed for bulk upload")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+    meeting.status = MeetingStatus.PENDING
+    await db.commit()
+
+    return ValidationUploadResponse(
+        meeting_id=str(meeting.id),
+        store_id=str(store.id),
+        total_pages=validation.total_pages,
+        validation=validation,
+    )
+
+
+@router.post("/upload/{meeting_id}/approve", response_model=ApproveResponse)
+async def approve_upload(
+    meeting_id: str,
+    current_user: User = Depends(require_corporate_or_gm),
+    db: AsyncSession = Depends(get_db),
+) -> ApproveResponse:
+    """
+    Approve a previously uploaded packet and trigger the full processing pipeline.
+    Runs parsing, flagging, PDF generation, and email notification.
+    """
+    try:
+        meeting_uuid = uuid.UUID(meeting_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid meeting_id format")
+
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_uuid))
+    meeting = result.scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+
+    # Check store access
+    await _check_store_access(current_user, str(meeting.store_id), db)
+
+    # Find uploaded PDFs in the meeting directory
+    upload_dir = os.path.join(settings.UPLOAD_DIR, str(meeting.store_id), str(meeting.id))
+    if not os.path.isdir(upload_dir):
+        raise HTTPException(status_code=404, detail="No uploaded files found for this meeting")
+
+    pdf_files = sorted(
+        [f for f in os.listdir(upload_dir) if f.lower().endswith(".pdf")
+         and f not in ("packet.pdf", "flagged_items.pdf")]
+    )
+    if not pdf_files:
+        raise HTTPException(status_code=404, detail="No uploaded PDF files found")
+
+    # Process all uploaded PDFs
+    meeting.status = MeetingStatus.PROCESSING
+    await db.flush()
+
+    service = ProcessingService()
+    total_pages = 0
+    merged_records: dict[str, int] = {}
+    merged_flags = {"yellow": 0, "red": 0, "total": 0}
+    last_result = None
+
+    for pdf_name in pdf_files:
+        file_path = os.path.join(upload_dir, pdf_name)
         try:
-            result = service.process_upload(
-                file_path, str(store.id), str(meeting.id), db
+            proc_result = service.process_upload(
+                file_path, str(meeting.store_id), str(meeting.id), db
             )
-            if hasattr(result, "__await__"):
-                result = await result
+            if hasattr(proc_result, "__await__"):
+                proc_result = await proc_result
 
-            total_pages += result["pages_extracted"]
-            for model_name, count in result["records_parsed"].items():
+            total_pages += proc_result["pages_extracted"]
+            for model_name, count in proc_result["records_parsed"].items():
                 merged_records[model_name] = merged_records.get(model_name, 0) + count
             for key in ("yellow", "red", "total"):
-                merged_flags[key] += result["flags_generated"][key]
-            last_result = result
+                merged_flags[key] += proc_result["flags_generated"][key]
+            last_result = proc_result
 
         except Exception as e:
-            logger.exception(f"Processing failed for {file.filename}")
+            logger.exception(f"Processing failed for {pdf_name}")
             meeting.status = MeetingStatus.ERROR
-            meeting.notes = f"Failed on {file.filename}: {str(e)}"
+            meeting.notes = f"Failed on {pdf_name}: {str(e)}"
             await db.commit()
             raise HTTPException(
                 status_code=500,
-                detail=f"Processing failed for {file.filename}: {str(e)}",
+                detail=f"Processing failed for {pdf_name}: {str(e)}",
             )
 
-    # Validate packet completeness on the last uploaded file
-    validation_result = None
-    if file_path:
-        try:
-            from app.services.packet_validator import PacketValidator
-            validator = PacketValidator()
-            validation_result = validator.validate(file_path)
-        except Exception:
-            logger.warning("Packet validation failed for bulk upload", exc_info=True)
-
-    return BulkUploadResponse(
+    return ApproveResponse(
         meeting_id=str(meeting.id),
-        files_processed=len(files),
-        total_pages_extracted=total_pages,
+        pages_extracted=total_pages,
         records_parsed=merged_records,
         flags_generated=merged_flags,
         packet_url=last_result.get("packet_path") if last_result else None,
         flagged_items_url=last_result.get("flagged_items_path") if last_result else None,
-        validation=validation_result,
     )

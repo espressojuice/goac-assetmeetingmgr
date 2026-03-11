@@ -30,7 +30,44 @@ class PacketValidationResult(BaseModel):
     total_pages: int
 
 
+# --- Detailed Packet Validation (for review page) ---
+
+class ClassifiedPage(BaseModel):
+    page_number: int
+    document_type: str
+    confidence: int  # match score from classifier
+
+
+class UnclassifiedPage(BaseModel):
+    page_number: int
+    snippet: str  # first ~120 chars of page text for identification
+
+
+class RequiredDocumentCheck(BaseModel):
+    name: str
+    found: bool
+    page_numbers: list[int] = []
+    where_to_find: str
+
+
+class DetailedValidationResult(BaseModel):
+    classified_pages: list[ClassifiedPage]
+    unclassified_pages: list[UnclassifiedPage]
+    required_documents: list[RequiredDocumentCheck]
+    completeness_percentage: float
+    is_complete: bool
+    total_pages: int
+
+
 # --- Upload ---
+
+class ValidationUploadResponse(BaseModel):
+    """Response from upload endpoint — validation only, no processing yet."""
+    meeting_id: str
+    store_id: str
+    total_pages: int
+    validation: DetailedValidationResult
+
 
 class UploadResponse(BaseModel):
     meeting_id: str
@@ -51,6 +88,16 @@ class BulkUploadResponse(BaseModel):
     packet_url: Optional[str] = None
     flagged_items_url: Optional[str] = None
     validation: Optional[PacketValidationResult] = None
+
+
+class ApproveResponse(BaseModel):
+    """Response from approve endpoint — full processing results."""
+    meeting_id: str
+    pages_extracted: int
+    records_parsed: dict[str, int]
+    flags_generated: dict[str, int]
+    packet_url: Optional[str] = None
+    flagged_items_url: Optional[str] = None
 
 
 # --- Flags ---

@@ -87,7 +87,66 @@
     </button>
   </section>
 
-  <!-- Processing Status -->
+  <!-- Validation Review (after upload, before processing) -->
+  <section class="card hidden" id="validation-section">
+    <div id="upload-spinner" class="spinner-wrap">
+      <div class="spinner"></div>
+      <p>Uploading &amp; validating...</p>
+    </div>
+
+    <div id="validation-results" class="hidden">
+      <h2>Packet Validation Review</h2>
+      <div class="results-grid">
+        <div class="result-card">
+          <span class="result-number" id="val-total-pages">0</span>
+          <span class="result-label">Total Pages</span>
+        </div>
+        <div class="result-card">
+          <span class="result-number" id="val-classified">0</span>
+          <span class="result-label">Classified</span>
+        </div>
+        <div class="result-card result-card-yellow">
+          <span class="result-number" id="val-unclassified">0</span>
+          <span class="result-label">Unclassified</span>
+        </div>
+        <div class="result-card" id="val-completeness-card">
+          <span class="result-number" id="val-completeness">0%</span>
+          <span class="result-label">Complete</span>
+        </div>
+      </div>
+
+      <!-- Classified Pages -->
+      <div class="validation-group">
+        <h3>Classified Pages</h3>
+        <table class="flags-table" id="classified-table">
+          <thead>
+            <tr><th>Document Type</th><th>Pages</th></tr>
+          </thead>
+          <tbody id="classified-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Unclassified Pages -->
+      <div class="validation-group" id="unclassified-group">
+        <h3 id="unclassified-heading">Unclassified Pages</h3>
+        <div id="unclassified-content"></div>
+      </div>
+
+      <!-- Required Documents Checklist -->
+      <div class="validation-group">
+        <h3>Required Documents Checklist</h3>
+        <div id="required-docs-list"></div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="download-links" style="margin-top: 1.5rem;">
+        <button id="reupload-btn" class="btn btn-secondary" onclick="document.getElementById('validation-section').classList.add('hidden');">Re-upload</button>
+        <button id="approve-btn" class="btn btn-primary">Approve &amp; Process</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Processing Status (after approval) -->
   <section class="card hidden" id="status-section">
     <div id="spinner" class="spinner-wrap">
       <div class="spinner"></div>
@@ -383,17 +442,27 @@
     processBtn.disabled = !selectedStoreId || selectedFiles.length === 0;
   }
 
-  // --- Upload & Process ---
+  // --- DOM refs (validation section) ---
+  const validationSection = document.getElementById('validation-section');
+  const uploadSpinner = document.getElementById('upload-spinner');
+  const validationResults = document.getElementById('validation-results');
+  const approveBtn = document.getElementById('approve-btn');
+
+  // Bind approve button
+  approveBtn.addEventListener('click', onApprove);
+
+  // --- Upload & Validate ---
   async function onProcess() {
     if (!selectedStoreId || selectedFiles.length === 0) return;
 
     hideError();
-    statusSection.classList.remove('hidden');
-    spinner.classList.remove('hidden');
-    results.classList.add('hidden');
+    validationSection.classList.remove('hidden');
+    uploadSpinner.classList.remove('hidden');
+    validationResults.classList.add('hidden');
+    statusSection.classList.add('hidden');
     flagsSection.classList.add('hidden');
     processBtn.disabled = true;
-    processBtn.textContent = 'Processing...';
+    processBtn.textContent = 'Uploading...';
 
     const formData = new FormData();
     formData.append('store_id', selectedStoreId);
@@ -401,7 +470,6 @@
     selectedFiles.forEach(f => formData.append('files', f));
 
     try {
-      const endpoint = selectedFiles.length === 1 ? '/upload' : '/upload/bulk';
       // Single file uses 'file' param, bulk uses 'files'
       if (selectedFiles.length === 1) {
         const singleForm = new FormData();
@@ -420,23 +488,115 @@
 
       const data = await res.json();
       currentMeetingId = data.meeting_id;
-      showResults(data);
-      loadFlags(currentMeetingId);
-      loadStoreMeetings(selectedStoreId);
+      showValidationResults(data);
 
       // Clear files
       selectedFiles = [];
       renderFileList();
 
-      // Scroll to results
-      statusSection.scrollIntoView({ behavior: 'smooth' });
+      validationSection.scrollIntoView({ behavior: 'smooth' });
     } catch (e) {
-      showError('Processing failed: ' + e.message);
-      statusSection.classList.add('hidden');
+      showError('Upload failed: ' + e.message);
+      validationSection.classList.add('hidden');
     } finally {
       processBtn.disabled = false;
       processBtn.textContent = 'Process Reports';
       updateProcessBtn();
+    }
+  }
+
+  function showValidationResults(data) {
+    uploadSpinner.classList.add('hidden');
+    validationResults.classList.remove('hidden');
+
+    const v = data.validation;
+    document.getElementById('val-total-pages').textContent = v.total_pages;
+    document.getElementById('val-classified').textContent = v.classified_pages.length;
+    document.getElementById('val-unclassified').textContent = v.unclassified_pages.length;
+
+    const pct = v.completeness_percentage;
+    document.getElementById('val-completeness').textContent = pct + '%';
+    const card = document.getElementById('val-completeness-card');
+    card.className = 'result-card' + (pct === 100 ? '' : pct >= 75 ? ' result-card-yellow' : ' result-card-red');
+
+    // Classified pages grouped by document type
+    const grouped = {};
+    v.classified_pages.forEach(function(p) {
+      if (!grouped[p.document_type]) grouped[p.document_type] = [];
+      grouped[p.document_type].push(p.page_number);
+    });
+    const classifiedTbody = document.getElementById('classified-tbody');
+    classifiedTbody.innerHTML = Object.entries(grouped).map(function(entry) {
+      return '<tr><td>' + escapeHtml(entry[0]) + '</td><td>' + formatPageRange(entry[1]) + '</td></tr>';
+    }).join('');
+
+    // Unclassified pages
+    const unclassifiedGroup = document.getElementById('unclassified-group');
+    const unclassifiedContent = document.getElementById('unclassified-content');
+    const unclassifiedHeading = document.getElementById('unclassified-heading');
+    if (v.unclassified_pages.length > 0) {
+      unclassifiedHeading.textContent = 'Unclassified Pages (' + v.unclassified_pages.length + ')';
+      unclassifiedContent.innerHTML =
+        '<p style="color:#92400e;font-size:0.9em;margin-bottom:0.5em;">These pages could not be matched to a known document type.</p>' +
+        '<table class="flags-table"><thead><tr><th style="width:60px">Page</th><th>Preview</th></tr></thead><tbody>' +
+        v.unclassified_pages.map(function(p) {
+          return '<tr><td>' + p.page_number + '</td><td style="color:#666">' + escapeHtml(p.snippet) + '</td></tr>';
+        }).join('') +
+        '</tbody></table>';
+    } else {
+      unclassifiedHeading.textContent = 'All Pages Classified';
+      unclassifiedContent.innerHTML = '<p style="color:#059669;font-size:0.9em;">Every page was successfully matched to a document type.</p>';
+    }
+
+    // Required documents checklist
+    const docsList = document.getElementById('required-docs-list');
+    docsList.innerHTML = v.required_documents.map(function(d) {
+      var icon = d.found
+        ? '<span style="color:#059669;font-size:1.2em;margin-right:8px;">&#10003;</span>'
+        : '<span style="color:#dc2626;font-size:1.2em;margin-right:8px;">&#10007;</span>';
+      var detail = d.found
+        ? '<span style="color:#999;font-size:0.8em;">Pages: ' + formatPageRange(d.page_numbers) + '</span>'
+        : '<span style="color:#666;font-size:0.8em;">' + escapeHtml(d.where_to_find) + '</span>';
+      return '<div style="padding:8px 0;border-bottom:1px solid #eee;display:flex;align-items:flex-start;">' +
+        icon +
+        '<div><strong' + (d.found ? '' : ' style="color:#dc2626"') + '>' + escapeHtml(d.name) + '</strong><br>' + detail + '</div>' +
+        '</div>';
+    }).join('');
+
+    // Show missing count warning on approve button
+    var missingCount = v.required_documents.filter(function(d) { return !d.found; }).length;
+    if (missingCount > 0) {
+      approveBtn.textContent = 'Approve & Process (' + missingCount + ' missing)';
+    } else {
+      approveBtn.textContent = 'Approve & Process';
+    }
+  }
+
+  // --- Approve & Process ---
+  async function onApprove() {
+    if (!currentMeetingId) return;
+
+    hideError();
+    validationSection.classList.add('hidden');
+    statusSection.classList.remove('hidden');
+    spinner.classList.remove('hidden');
+    results.classList.add('hidden');
+
+    try {
+      var res = await fetch(API + '/upload/' + currentMeetingId + '/approve', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Processing failed');
+      }
+
+      const data = await res.json();
+      showResults(data);
+      loadFlags(currentMeetingId);
+      loadStoreMeetings(selectedStoreId);
+      statusSection.scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+      showError('Processing failed: ' + e.message);
+      statusSection.classList.add('hidden');
     }
   }
 
@@ -471,6 +631,24 @@
     const flaggedLink = document.getElementById('download-flagged');
     packetLink.href = API + '/packets/' + currentMeetingId;
     flaggedLink.href = API + '/packets/' + currentMeetingId + '/flagged-items';
+  }
+
+  function formatPageRange(pages) {
+    if (!pages || pages.length === 0) return '';
+    var sorted = pages.slice().sort(function(a, b) { return a - b; });
+    var ranges = [];
+    var start = sorted[0], end = sorted[0];
+    for (var i = 1; i < sorted.length; i++) {
+      if (sorted[i] === end + 1) {
+        end = sorted[i];
+      } else {
+        ranges.push(start === end ? '' + start : start + '-' + end);
+        start = sorted[i];
+        end = sorted[i];
+      }
+    }
+    ranges.push(start === end ? '' + start : start + '-' + end);
+    return ranges.join(', ');
   }
 
   // --- Flags ---

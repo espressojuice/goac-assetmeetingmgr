@@ -142,12 +142,46 @@
 - [x] Create backend/app/services/packet_validator.py (16 doc types, disambiguation, OCR-tolerant)
 - [x] Integrate into upload endpoint (both single and bulk)
 - [x] Update UploadResponse/BulkUploadResponse schemas with PacketValidationResult
-- [ ] Frontend upload flow shows found/missing docs (deferred — needs frontend work)
+- [x] Frontend upload flow shows found/missing docs
 
 ## Task 5: Tests + Commit
 - [x] Run all tests — 459 passing, 0 failures
 - [x] Update todo.md, lessons.md, README.md
 - [x] Commit and push (3cfa8a2)
+
+# Session 18 — Post-Upload Validation Review
+
+## Task 1: Backend — Validate-Only Upload + Approve Endpoint
+- [x] Add DetailedValidationResult schema (ClassifiedPage, UnclassifiedPage, RequiredDocumentCheck)
+- [x] Add ValidationUploadResponse and ApproveResponse schemas
+- [x] Add validate_detailed() method to PacketValidator (returns per-page classification with scores and snippets)
+- [x] Refactor _classify_page into _classify_page_with_score (returns doc_id + score tuple)
+- [x] Modify POST /upload to validate-only (no processing, meeting stays PENDING)
+- [x] Modify POST /upload/bulk to validate-only
+- [x] Add POST /upload/{meeting_id}/approve endpoint (triggers full processing pipeline)
+- [x] Move PacketValidator import to module level for clean test patching
+
+## Task 2: Frontend — Upload Page + Validation Review Page
+- [x] Add API types and functions to lib/api.ts (uploadForValidation, uploadBulkForValidation, approveUpload)
+- [x] Create /stores/[storeId]/upload/page.tsx (drag-and-drop upload, date picker, redirects to validate)
+- [x] Create /stores/[storeId]/meetings/[meetingId]/validate/page.tsx with 3 sections:
+  - Classified Pages table (grouped by document type with page ranges)
+  - Unclassified Pages warning section (page number + text snippet)
+  - Required Documents Checklist (16 items, green/red icons, where-to-find for missing)
+- [x] Completeness percentage header, Re-upload and Approve & Process buttons
+- [x] Validation data passed via sessionStorage between upload and validate pages
+
+## Task 3: Static HTML — Inline Validation Step
+- [x] Updated index.html with validation-section (shows after upload, before processing)
+- [x] Validation results shown inline: classified pages table, unclassified pages, required docs checklist
+- [x] Approve & Process button calls POST /upload/{meeting_id}/approve
+- [x] Re-upload button hides validation section to allow re-upload
+- [x] Processing results section only shown after approval
+
+## Task 4: Tests
+- [x] Updated all upload tests for new validate-only response format
+- [x] Added 4 new tests for approve endpoint (success, 404, 422, 401)
+- [x] 461 tests passing (up from 459)
 
 ## Session Log
 
@@ -286,6 +320,19 @@
   - Store 17 = Orr Infiniti (Shreveport Infiniti)
 - 12 of 17 PDFs were scanned images requiring OCR; 5 had extractable text
 - Stores without test packets: Searcy GM, Longview GMC, Longview Pre-Owned, CAP Pre-Owned, Credit Builders Auto, Shreveport GOPO, Shreveport Pre-Owned, Destin Pre-Owned, CAP Mazda (bundled with CAP store 01)
+
+### Session 18 — 2026-03-11 (Post-Upload Validation Review)
+- Split upload flow into validate-then-approve: upload saves file + runs PacketValidator only, approve triggers full processing
+- Added DetailedValidationResult with per-page classification (page number, doc type, confidence score, text snippets for unclassified)
+- New schemas: ValidationUploadResponse, ApproveResponse, ClassifiedPage, UnclassifiedPage, RequiredDocumentCheck
+- PacketValidator.validate_detailed() returns page-level detail; _classify_page_with_score() refactor
+- POST /upload and /upload/bulk now return validation results only (no processing, meeting PENDING)
+- New POST /upload/{meeting_id}/approve triggers full pipeline (parsing, flagging, PDF generation, email)
+- Frontend: /stores/[storeId]/upload page with drag-and-drop, date picker
+- Frontend: /stores/[storeId]/meetings/[meetingId]/validate page with 3 sections (classified pages, unclassified pages, required docs checklist) + completeness % + approve/re-upload buttons
+- Static HTML: inline validation review with classified/unclassified tables, required docs checklist, approve button
+- Updated all upload tests + 4 new approve endpoint tests
+- 461 tests passing (up from 459)
 
 ### Session 17 — 2026-03-11 (Phase 3 Infrastructure)
 - Scanned all 17 test packet PDFs with tesseract OCR for required document detection

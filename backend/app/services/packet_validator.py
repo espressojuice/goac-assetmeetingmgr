@@ -9,7 +9,15 @@ from typing import Union
 
 import pdfplumber
 
-from app.api.schemas import FoundDocument, MissingDocument, PacketValidationResult
+from app.api.schemas import (
+    ClassifiedPage,
+    DetailedValidationResult,
+    FoundDocument,
+    MissingDocument,
+    PacketValidationResult,
+    RequiredDocumentCheck,
+    UnclassifiedPage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +221,80 @@ class PacketValidator:
             total_pages=total_pages,
         )
 
+    def validate_detailed(self, source: Union[str, bytes, Path]) -> DetailedValidationResult:
+        """Validate a PDF and return page-level classification detail.
+
+        Returns per-page classification with scores, unclassified page snippets,
+        and the full 16-document checklist.
+        """
+        pages_text = self._extract_text(source)
+        total_pages = len(pages_text)
+
+        classified_pages: list[ClassifiedPage] = []
+        unclassified_pages: list[UnclassifiedPage] = []
+        # doc_id -> list of 1-based page numbers
+        doc_pages: dict[int, list[int]] = {}
+
+        for page_idx, text in enumerate(pages_text):
+            page_num = page_idx + 1
+            if not text or not text.strip():
+                # Blank page — treat as unclassified
+                unclassified_pages.append(UnclassifiedPage(
+                    page_number=page_num,
+                    snippet="(blank page)",
+                ))
+                continue
+
+            best_doc_id, best_score = self._classify_page_with_score(text)
+            if best_doc_id is not None:
+                # Look up doc name
+                doc_name = next(
+                    name for did, name, _, _, _ in _DOCUMENT_DEFS if did == best_doc_id
+                )
+                classified_pages.append(ClassifiedPage(
+                    page_number=page_num,
+                    document_type=doc_name,
+                    confidence=best_score,
+                ))
+                doc_pages.setdefault(best_doc_id, []).append(page_num)
+            else:
+                # Extract snippet: first non-empty line, up to 120 chars
+                snippet = ""
+                for line in text.split("\n"):
+                    stripped = line.strip()
+                    if stripped:
+                        snippet = stripped[:120]
+                        break
+                unclassified_pages.append(UnclassifiedPage(
+                    page_number=page_num,
+                    snippet=snippet or "(no readable text)",
+                ))
+
+        # Build the 16-document checklist
+        required_documents: list[RequiredDocumentCheck] = []
+        found_count = 0
+        for doc_id, name, where_to_find, _, _ in _DOCUMENT_DEFS:
+            found = doc_id in doc_pages
+            if found:
+                found_count += 1
+            required_documents.append(RequiredDocumentCheck(
+                name=name,
+                found=found,
+                page_numbers=sorted(doc_pages.get(doc_id, [])),
+                where_to_find=where_to_find,
+            ))
+
+        completeness = (found_count / len(_DOCUMENT_DEFS)) * 100.0 if _DOCUMENT_DEFS else 0.0
+
+        return DetailedValidationResult(
+            classified_pages=classified_pages,
+            unclassified_pages=unclassified_pages,
+            required_documents=required_documents,
+            completeness_percentage=round(completeness, 1),
+            is_complete=found_count == len(_DOCUMENT_DEFS),
+            total_pages=total_pages,
+        )
+
     def _extract_text(self, source: Union[str, bytes, Path]) -> list[str]:
         """Extract text from each page of the PDF using pdfplumber."""
         pages_text: list[str] = []
@@ -246,14 +328,14 @@ class PacketValidator:
                 return True
         return False
 
-    def _classify_page(self, text: str) -> int | None:
+    def _classify_page_with_score(self, text: str) -> tuple[int | None, int]:
         """Classify a single page's text to the best-matching document type.
 
-        Returns the doc_id of the best match, or None if no match.
+        Returns (doc_id, score) of the best match, or (None, 0) if no match.
         """
         # Skip cover/summary pages that reference many schedules at once
         if self._is_summary_cover_page(text):
-            return None
+            return None, 0
 
         candidates: list[tuple[int, int]] = []  # (doc_id, match_score)
 
@@ -272,8 +354,16 @@ class PacketValidator:
                 candidates.append((doc_id, score))
 
         if not candidates:
-            return None
+            return None, 0
 
         # Return the doc_id with the highest score
         candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[0][0]
+        return candidates[0]
+
+    def _classify_page(self, text: str) -> int | None:
+        """Classify a single page's text to the best-matching document type.
+
+        Returns the doc_id of the best match, or None if no match.
+        """
+        doc_id, _ = self._classify_page_with_score(text)
+        return doc_id

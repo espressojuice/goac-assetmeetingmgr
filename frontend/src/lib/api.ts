@@ -431,6 +431,107 @@ export function markAllNotificationsRead(token?: string): Promise<{ status: stri
   return apiFetch("/notifications/read-all", { method: "POST", token });
 }
 
+// --- Upload Validation ---
+
+export interface ClassifiedPage {
+  page_number: number;
+  document_type: string;
+  confidence: number;
+}
+
+export interface UnclassifiedPage {
+  page_number: number;
+  snippet: string;
+}
+
+export interface RequiredDocumentCheck {
+  name: string;
+  found: boolean;
+  page_numbers: number[];
+  where_to_find: string;
+}
+
+export interface DetailedValidationResult {
+  classified_pages: ClassifiedPage[];
+  unclassified_pages: UnclassifiedPage[];
+  required_documents: RequiredDocumentCheck[];
+  completeness_percentage: number;
+  is_complete: boolean;
+  total_pages: number;
+}
+
+export interface ValidationUploadResponse {
+  meeting_id: string;
+  store_id: string;
+  total_pages: number;
+  validation: DetailedValidationResult;
+}
+
+export interface ApproveResponse {
+  meeting_id: string;
+  pages_extracted: number;
+  records_parsed: Record<string, number>;
+  flags_generated: Record<string, number>;
+  packet_url: string | null;
+  flagged_items_url: string | null;
+}
+
+export async function uploadForValidation(
+  file: File,
+  storeId: string,
+  meetingDate: string,
+  token?: string,
+): Promise<ValidationUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("store_id", storeId);
+  formData.append("meeting_date", meetingDate);
+
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}/api/v1/upload`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Upload failed: ${text}`);
+  }
+  return res.json();
+}
+
+export async function uploadBulkForValidation(
+  files: File[],
+  storeId: string,
+  meetingDate: string,
+  token?: string,
+): Promise<ValidationUploadResponse> {
+  const formData = new FormData();
+  formData.append("store_id", storeId);
+  formData.append("meeting_date", meetingDate);
+  files.forEach((f) => formData.append("files", f));
+
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}/api/v1/upload/bulk`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Upload failed: ${text}`);
+  }
+  return res.json();
+}
+
+export function approveUpload(meetingId: string, token?: string): Promise<ApproveResponse> {
+  return apiFetch(`/upload/${meetingId}/approve`, { method: "POST", token });
+}
+
 // --- Auth ---
 export interface AuthCallbackResponse {
   access_token: string;
