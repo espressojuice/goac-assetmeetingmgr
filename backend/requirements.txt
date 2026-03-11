@@ -17,3 +17,4 @@ python-jose[cryptography]
 bcrypt
 sendgrid
 apscheduler
+tzdata
