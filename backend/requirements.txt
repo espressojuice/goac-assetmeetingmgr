@@ -18,3 +18,4 @@ bcrypt
 sendgrid
 apscheduler
 tzdata
+boto3

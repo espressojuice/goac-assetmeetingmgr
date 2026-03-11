@@ -117,6 +117,15 @@ async def upload_report(
         if hasattr(result, "__await__"):
             result = await result
 
+        # Validate packet completeness
+        validation_result = None
+        try:
+            from app.services.packet_validator import PacketValidator
+            validator = PacketValidator()
+            validation_result = validator.validate(file_path)
+        except Exception:
+            logger.warning("Packet validation failed", exc_info=True)
+
         return UploadResponse(
             meeting_id=str(meeting.id),
             pages_extracted=result["pages_extracted"],
@@ -124,6 +133,7 @@ async def upload_report(
             flags_generated=result["flags_generated"],
             packet_url=result.get("packet_path"),
             flagged_items_url=result.get("flagged_items_path"),
+            validation=validation_result,
         )
     except Exception as e:
         logger.exception("Processing failed")
@@ -204,6 +214,16 @@ async def upload_bulk_reports(
                 detail=f"Processing failed for {file.filename}: {str(e)}",
             )
 
+    # Validate packet completeness on the last uploaded file
+    validation_result = None
+    if file_path:
+        try:
+            from app.services.packet_validator import PacketValidator
+            validator = PacketValidator()
+            validation_result = validator.validate(file_path)
+        except Exception:
+            logger.warning("Packet validation failed for bulk upload", exc_info=True)
+
     return BulkUploadResponse(
         meeting_id=str(meeting.id),
         files_processed=len(files),
@@ -212,4 +232,5 @@ async def upload_bulk_reports(
         flags_generated=merged_flags,
         packet_url=last_result.get("packet_path") if last_result else None,
         flagged_items_url=last_result.get("flagged_items_path") if last_result else None,
+        validation=validation_result,
     )

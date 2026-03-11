@@ -10,6 +10,26 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# --- Packet Validation ---
+
+class FoundDocument(BaseModel):
+    name: str
+    page_numbers: list[int]
+
+
+class MissingDocument(BaseModel):
+    name: str
+    where_to_find: str
+
+
+class PacketValidationResult(BaseModel):
+    found_documents: list[FoundDocument]
+    missing_documents: list[MissingDocument]
+    completeness_percentage: float
+    is_complete: bool
+    total_pages: int
+
+
 # --- Upload ---
 
 class UploadResponse(BaseModel):
@@ -19,6 +39,7 @@ class UploadResponse(BaseModel):
     flags_generated: dict[str, int]
     packet_url: Optional[str] = None
     flagged_items_url: Optional[str] = None
+    validation: Optional[PacketValidationResult] = None
 
 
 class BulkUploadResponse(BaseModel):
@@ -29,6 +50,7 @@ class BulkUploadResponse(BaseModel):
     flags_generated: dict[str, int]
     packet_url: Optional[str] = None
     flagged_items_url: Optional[str] = None
+    validation: Optional[PacketValidationResult] = None
 
 
 # --- Flags ---

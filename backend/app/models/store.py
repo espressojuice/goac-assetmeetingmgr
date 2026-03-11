@@ -21,6 +21,7 @@ class Store(Base):
     meeting_cadence: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     gm_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     gm_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reynolds_site_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

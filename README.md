@@ -10,14 +10,15 @@ Parse R&R DMS exports (PDF schedules, GL reports) into structured data. Apply co
 ### Phase 2: Accountability Web App *(COMPLETE)*
 Web interface for meeting scheduling, packet review, flag responses, and escalation tracking. Google OAuth authentication with role-based access (corporate/gm/manager). Next.js frontend with corporate dashboard, store detail, and meeting detail pages. Email notifications via SendGrid. Full RBAC on all API routes.
 
-### Phase 3: Full Automation
-Automated DMS export ingestion, trend analysis, cross-store benchmarking, and executive dashboards.
+### Phase 3: Infrastructure & Automation *(IN PROGRESS)*
+S3 packet storage (Hetzner Object Storage), packet completeness validation (16-document checklist), Reynolds site ID integration, automated DMS export ingestion, trend analysis, cross-store benchmarking.
 
 ## Tech Stack
 
 - **Backend**: FastAPI (Python) + PostgreSQL + SQLAlchemy + Alembic
 - **Frontend**: Next.js 14 (App Router) + NextAuth + Tailwind CSS
 - **Auth**: Google OAuth via NextAuth → backend JWT
+- **Storage**: Hetzner Object Storage (S3-compatible via boto3)
 - **APIs**: Google Calendar API, SendGrid/Postmark
 - **Data Sources**: R&R DMS PDF exports
 
@@ -28,7 +29,7 @@ Automated DMS export ingestion, trend analysis, cross-store benchmarking, and ex
 ### Core
 | Model | Table | Description |
 |-------|-------|-------------|
-| Store | `stores` | Dealership locations with GM info and meeting cadence |
+| Store | `stores` | Dealership locations with GM info, meeting cadence, and Reynolds site ID |
 | Meeting | `meetings` | Per-store meeting instances with status tracking |
 
 ### Inventory (`inventory.py`)
@@ -424,3 +425,29 @@ cd backend && python3 -m pytest tests/ -v
 **Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 455 tests passing.
 
 **Production LIVE at https://assetmeeting.goac.io.** Deployed on Hetzner VPS (5.161.71.87) alongside greggorr.com, ctrl.goac.io, and ocrmypdf.goac.io — all sharing Traefik v2.11 for routing and auto-HTTPS. Docker Compose with 4 containers (PostgreSQL, FastAPI, Next.js, backup). Google OAuth configured (Google Workspace, Internal). SendGrid domain-authenticated for goac.io. GitHub Actions CI/CD pipeline ready (secrets need configuring). Automated daily backups with 7-day retention.
+
+**Production data seeded.** 24 dealership stores loaded (including CAP GM). Bryan Brookes promoted to corporate role. 17 test packet PDFs uploaded and analyzed — Reynolds store numbers extracted for 15 of 24 stores. Reynolds 7-digit site IDs stored on all 17 stores with R&R accounts.
+
+**Phase 3 started.** S3 storage service (Hetzner Object Storage via boto3), packet completeness validator (16-document checklist with OCR-tolerant detection), Reynolds site ID column on stores table (Alembic migration 004). 459 tests passing. Full packet scan results in `data/packet_scan_results.md`.
+
+## Reynolds Store Number Map
+
+| Reynolds # | Dealership | Legal Entity Name | City | State |
+|-----------|------------|-------------------|------|-------|
+| 01 | CAP (GMC/Buick/Mazda) | Classic Auto Park | Texarkana | TX |
+| 02 | Texarkana Kia | Classic State Line Kia | Texarkana | TX |
+| 03 | Ashdown Chevrolet | Orr Motors of Ashdown, Inc | Ashdown | AR |
+| 04 | CAP Mercedes | Classic Auto Park | Texarkana | TX |
+| 05 | Hot Springs Cadillac | Orr Motors of Arkansas Inc | Hot Springs | AR |
+| 06 | Hot Springs Honda | Orr Motors of Hot Springs Inc | Hot Springs | AR |
+| 07 | Hot Springs Toyota | Orr Toyota | Hot Springs | AR |
+| 09 | Searcy CDJ | Orr Motors North | Searcy | AR |
+| 10 | Searcy Toyota | Orr Motors of Searcy | Searcy | AR |
+| 11 | Shreveport Cadillac | Orr Motors | Shreveport | LA |
+| 12 | Shreveport Acura | Orr Motors of Louisiana | Shreveport | LA |
+| 13 | Shreveport BMW | Greg Orr Motors / Orr BMW | Shreveport | LA |
+| 14 | Destin Porsche | Orr Motors of Destin | Destin | FL |
+| 16 | Texarkana CDJR | Classic CDJ, Inc | Texarkana | TX |
+| 17 | Shreveport Infiniti | Orr Infiniti | Shreveport | LA |
+
+**Not yet mapped** (no test packets): Searcy GM, Longview GMC, Longview Pre-Owned, CAP Pre-Owned, CAP Mazda (bundled with store 01), Credit Builders Auto, Shreveport GOPO, Shreveport Pre-Owned, Destin Pre-Owned.

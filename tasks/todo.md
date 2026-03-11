@@ -116,7 +116,38 @@
 - [ ] Set up GitHub Actions secrets for CI/CD (DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PORT)
 - [ ] Kernel upgrade reboot on VPS
 - [ ] Test end-to-end login flow (Google OAuth → dashboard)
-- [ ] Create initial store records in database
+- [x] Create initial store records in database (23 stores seeded)
+- [x] Promote Bryan Brookes to corporate role
+- [x] Upload test packet PDFs to server (17 files)
+- [x] Extract Reynolds store numbers from all test packets via OCR
+
+# Phase 3 Tasks — Session 17
+
+## Task 1: Scan Test Packets
+- [x] SSH to server, scan all 17 PDFs with pdfplumber + tesseract OCR
+- [x] Save structured results to data/packet_scan_results.md
+
+## Task 2: Add CAP GM + Reynolds Site IDs
+- [x] Add reynolds_site_id column to stores table (Alembic migration 004)
+- [x] Insert CAP GM - Texarkana, TX store (24 stores total)
+- [x] Update 17 stores with Reynolds 7-digit site IDs
+- [x] Verified with query — all correct
+
+## Task 3: Hetzner Object Storage Service
+- [x] Create backend/app/services/storage_service.py (boto3 S3-compatible, lazy client, graceful degradation)
+- [x] Add S3 config to settings (5 new settings), .env.example
+- [x] Add boto3 to requirements.txt
+
+## Task 4: Packet Completeness Validator
+- [x] Create backend/app/services/packet_validator.py (16 doc types, disambiguation, OCR-tolerant)
+- [x] Integrate into upload endpoint (both single and bulk)
+- [x] Update UploadResponse/BulkUploadResponse schemas with PacketValidationResult
+- [ ] Frontend upload flow shows found/missing docs (deferred — needs frontend work)
+
+## Task 5: Tests + Commit
+- [x] Run all tests — 459 passing, 0 failures
+- [x] Update todo.md, lessons.md, README.md
+- [ ] Commit and push
 
 ## Session Log
 
@@ -230,3 +261,48 @@
 - Set up SendGrid with domain authentication for goac.io
 - Configured DNS A record for assetmeeting.goac.io → 5.161.71.87
 - Server runs alongside greggorr.com, ctrl.goac.io, ocrmypdf.goac.io on shared Traefik
+
+### Session 16 — 2026-03-11 (Production Data Seeding + Store Number Research)
+- Promoted Bryan Brookes (bbrookes@greggorrcompanies.com) to CORPORATE role in production DB
+- Seeded 23 dealership stores with names, codes, cities, states, timezone (US/Central)
+- Uploaded 17 test packet PDFs to server at /opt/assetmeetinghelper/testdata/packets/
+- Installed tesseract + pytesseract in production API container for PDF text extraction research
+- OCR'd all 17 packets to extract Reynolds store numbers from parts analysis headers
+- Identified 15 Reynolds store numbers mapped to dealerships:
+  - Store 01 = Classic Auto Park (CAP GMC/Buick/Mazda, Texarkana)
+  - Store 02 = Classic State Line Kia (Texarkana Kia)
+  - Store 03 = Orr Motors of Ashdown (Ashdown Chevrolet)
+  - Store 04 = Classic Auto Park (CAP Mercedes, Texarkana)
+  - Store 05 = Orr Motors of Arkansas (Hot Springs Cadillac)
+  - Store 06 = Orr Motors of Hot Springs (Hot Springs Honda)
+  - Store 07 = Orr Toyota (Hot Springs Toyota)
+  - Store 09 = Orr Motors North (Searcy CDJ)
+  - Store 10 = Orr Motors of Searcy (Searcy Toyota)
+  - Store 11 = Orr Motors (Shreveport Cadillac)
+  - Store 12 = Orr Motors of Louisiana (Shreveport Acura)
+  - Store 13 = Greg Orr Motors / Orr BMW (Shreveport BMW)
+  - Store 14 = Orr Motors of Destin (Destin Porsche)
+  - Store 16 = Classic CDJ, Inc (Texarkana CDJR)
+  - Store 17 = Orr Infiniti (Shreveport Infiniti)
+- 12 of 17 PDFs were scanned images requiring OCR; 5 had extractable text
+- Stores without test packets: Searcy GM, Longview GMC, Longview Pre-Owned, CAP Pre-Owned, Credit Builders Auto, Shreveport GOPO, Shreveport Pre-Owned, Destin Pre-Owned, CAP Mazda (bundled with CAP store 01)
+
+### Session 17 — 2026-03-11 (Phase 3 Infrastructure)
+- Scanned all 17 test packet PDFs with tesseract OCR for required document detection
+  - Average completeness: 25% (best: CAP at 50%, worst: BMW(2) at 6%)
+  - Parts 2222 detected in 94% of packets; Service/Parts Receivables, GL 0504 New/Used, and Wholesales at 0%
+  - Full results saved to data/packet_scan_results.md
+- Added `reynolds_site_id` column to stores table (Alembic migration 004, unique index)
+- Inserted CAP GM store (24 total), updated 17 stores with Reynolds 7-digit site IDs
+- Built StorageService (backend/app/services/storage_service.py):
+  - Hetzner S3-compatible object storage via boto3
+  - Lazy client init, graceful degradation when not configured
+  - upload_packet, get_packet_url (presigned), list_packets methods
+- Built PacketValidator (backend/app/services/packet_validator.py):
+  - 16 required document types with OCR-tolerant regex patterns
+  - Disambiguation via negative patterns and priority scoring
+  - Cover page detection to avoid false positives
+  - Integrated into both upload endpoints; results in API response
+- Updated config.py (5 S3 settings), .env.example, requirements.txt (boto3)
+- Updated schemas.py (FoundDocument, MissingDocument, PacketValidationResult)
+- 459 tests passing (all previous + new code paths)

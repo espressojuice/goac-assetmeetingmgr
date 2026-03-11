@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: Optional[str] = None
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # S3 Storage (Hetzner Object Storage)
+    S3_ENDPOINT_URL: str = ""
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_BUCKET_NAME: str = "assetmeetinghelper"
+    S3_REGION: str = "eu-central"
+
     # Email (SendGrid)
     SENDGRID_API_KEY: str = ""
     SENDGRID_FROM_EMAIL: str = "notifications@goac-assetmeetingmgr.com"
