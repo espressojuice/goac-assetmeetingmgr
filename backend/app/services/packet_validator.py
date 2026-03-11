@@ -313,6 +313,112 @@ class PacketValidator:
             total_pages=total_pages,
         )
 
+    def validate_detailed_with_progress(
+        self, source: Union[str, bytes, Path], meeting_id: str
+    ) -> DetailedValidationResult:
+        """Validate a PDF page-by-page, updating progress store after each page.
+
+        Same result as validate_detailed() but streams progress to the in-memory store.
+        """
+        from app.services.validation_progress import ValidationProgress, set_progress
+
+        progress = ValidationProgress(status="counting_pages")
+        set_progress(meeting_id, progress)
+
+        # Count pages cheaply first
+        total_pages = self._count_pages(source)
+        progress.total_pages = total_pages
+        progress.status = "validating"
+        set_progress(meeting_id, progress)
+
+        # Extract and classify page by page
+        classified_pages: list[ClassifiedPage] = []
+        unclassified_pages: list[UnclassifiedPage] = []
+        doc_pages: dict[int, list[int]] = {}
+
+        pages_text = self._extract_text(source)
+
+        for page_idx, text in enumerate(pages_text):
+            page_num = page_idx + 1
+            progress.current_page = page_num
+
+            if not text or not text.strip():
+                up = UnclassifiedPage(page_number=page_num, snippet="(blank page)")
+                unclassified_pages.append(up)
+                progress.unclassified_pages.append(up.model_dump())
+            else:
+                best_doc_id, best_score = self._classify_page_with_score(text)
+                if best_doc_id is not None:
+                    doc_name = next(
+                        name for did, name, _, _, _ in _DOCUMENT_DEFS if did == best_doc_id
+                    )
+                    cp = ClassifiedPage(
+                        page_number=page_num,
+                        document_type=doc_name,
+                        confidence=best_score,
+                    )
+                    classified_pages.append(cp)
+                    doc_pages.setdefault(best_doc_id, []).append(page_num)
+                    progress.classified_pages.append(cp.model_dump())
+                else:
+                    snippet = ""
+                    for line in text.split("\n"):
+                        stripped = line.strip()
+                        if stripped:
+                            snippet = stripped[:120]
+                            break
+                    up = UnclassifiedPage(
+                        page_number=page_num, snippet=snippet or "(no readable text)"
+                    )
+                    unclassified_pages.append(up)
+                    progress.unclassified_pages.append(up.model_dump())
+
+            # Update required documents checklist after each page
+            required_documents: list[RequiredDocumentCheck] = []
+            found_count = 0
+            for doc_id, name, where_to_find, _, _ in _DOCUMENT_DEFS:
+                found = doc_id in doc_pages
+                if found:
+                    found_count += 1
+                required_documents.append(RequiredDocumentCheck(
+                    name=name,
+                    found=found,
+                    page_numbers=sorted(doc_pages.get(doc_id, [])),
+                    where_to_find=where_to_find,
+                ))
+
+            completeness = (found_count / len(_DOCUMENT_DEFS)) * 100.0 if _DOCUMENT_DEFS else 0.0
+            progress.required_documents = [rd.model_dump() for rd in required_documents]
+            progress.completeness_percentage = round(completeness, 1)
+            set_progress(meeting_id, progress)
+
+        # Final result
+        progress.status = "complete"
+        progress.is_complete = found_count == len(_DOCUMENT_DEFS)
+        set_progress(meeting_id, progress)
+
+        return DetailedValidationResult(
+            classified_pages=classified_pages,
+            unclassified_pages=unclassified_pages,
+            required_documents=required_documents,
+            completeness_percentage=round(completeness, 1),
+            is_complete=found_count == len(_DOCUMENT_DEFS),
+            total_pages=total_pages,
+        )
+
+    @staticmethod
+    def _count_pages(source: Union[str, bytes, Path]) -> int:
+        """Count PDF pages cheaply without extracting text."""
+        import io
+
+        if isinstance(source, bytes):
+            pdf_file = io.BytesIO(source)
+        else:
+            pdf_file = str(source)
+
+        with pdfplumber.open(pdf_file) as pdf:
+            return len(pdf.pages)
+
     # Minimum characters from pdfplumber before triggering OCR fallback
     _OCR_THRESHOLD = 50
 

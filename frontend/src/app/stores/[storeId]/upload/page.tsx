@@ -52,13 +52,13 @@ export default function UploadPage() {
           ? await uploadForValidation(files[0], storeId, meetingDate, token)
           : await uploadBulkForValidation(files, storeId, meetingDate, token);
 
-      // Store validation data for the review page
+      // Store total pages for progress display
       sessionStorage.setItem(
-        `validation_${result.meeting_id}`,
-        JSON.stringify(result.validation)
+        `upload_total_pages_${result.meeting_id}`,
+        String(result.total_pages)
       );
 
-      // Redirect to validation review page
+      // Redirect immediately — validation runs in background
       router.push(
         `/stores/${storeId}/meetings/${result.meeting_id}/validate`
       );

@@ -90,6 +90,26 @@ class BulkUploadResponse(BaseModel):
     validation: Optional[PacketValidationResult] = None
 
 
+class UploadAcceptedResponse(BaseModel):
+    """Response from upload endpoint — file saved, validation starting in background."""
+    meeting_id: str
+    store_id: str
+    total_pages: int
+
+
+class ValidationProgressResponse(BaseModel):
+    """Real-time progress of background validation."""
+    status: str  # uploading | counting_pages | validating | complete | error
+    current_page: int = 0
+    total_pages: int = 0
+    classified_pages: list[ClassifiedPage] = []
+    unclassified_pages: list[UnclassifiedPage] = []
+    required_documents: list[RequiredDocumentCheck] = []
+    completeness_percentage: float = 0.0
+    is_complete: bool = False
+    error: Optional[str] = None
+
+
 class ApproveResponse(BaseModel):
     """Response from approve endpoint — full processing results."""
     meeting_id: str

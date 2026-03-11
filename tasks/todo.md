@@ -337,6 +337,20 @@
 - Updated all upload tests + 4 new approve endpoint tests
 - 461 tests passing (up from 459)
 
+### Session 19 — 2026-03-11 (Real-Time Validation Progress)
+- Made packet validation async with real-time progress streaming
+- Upload endpoints now return immediately with UploadAcceptedResponse (meeting_id, store_id, total_pages)
+- Validation runs in background thread via asyncio.run_in_executor
+- New in-memory progress store (backend/app/services/validation_progress.py) keyed by meeting_id
+- PacketValidator.validate_detailed_with_progress() processes page-by-page, updating progress after each page
+- New GET /upload/{meeting_id}/progress endpoint returns real-time state (status, current_page, classified/unclassified pages, required docs checklist, completeness %)
+- Frontend validate page reworked: polls progress every 2s, shows animated progress bar ("Processing page X of Y"), streams classified pages and required docs checklist in real-time
+- Progress states: uploading → counting_pages → validating (page X/Y) → complete | error
+- 5-minute client-side timeout with error message
+- Upload page redirects immediately after file saved (no waiting for validation)
+- Updated all upload tests for new async response format
+- 461 tests passing (0 regressions)
+
 ### Session 17 — 2026-03-11 (Phase 3 Infrastructure)
 - Scanned all 17 test packet PDFs with tesseract OCR for required document detection
   - Average completeness: 25% (best: CAP at 50%, worst: BMW(2) at 6%)

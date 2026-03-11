@@ -222,8 +222,9 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 ### Upload (Corporate + GM)
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/upload` | Upload PDF for validation only (returns page classification + checklist) |
-| POST | `/api/v1/upload/bulk` | Upload multiple PDFs for validation only |
+| POST | `/api/v1/upload` | Upload PDF — saves file, starts async validation, returns immediately |
+| POST | `/api/v1/upload/bulk` | Upload multiple PDFs — saves files, starts async validation |
+| GET | `/api/v1/upload/{meeting_id}/progress` | Poll real-time validation progress (page-by-page) |
 | POST | `/api/v1/upload/{meeting_id}/approve` | Approve validated upload — triggers full processing pipeline |
 
 ### Packets (Authenticated, store-scoped)
@@ -429,7 +430,7 @@ cd backend && python3 -m pytest tests/ -v
 
 **Production data seeded.** 24 dealership stores loaded (including CAP GM). Bryan Brookes promoted to corporate role. 17 test packet PDFs uploaded and analyzed — Reynolds store numbers extracted for 15 of 24 stores. Reynolds 7-digit site IDs stored on all 17 stores with R&R accounts.
 
-**Phase 3 in progress.** S3 storage service (Hetzner Object Storage via boto3), packet completeness validator (16-document checklist with OCR-tolerant detection), Reynolds site ID column on stores table (Alembic migration 004). Validate-then-approve upload flow: upload returns per-page classification with confidence scores and 16-document checklist; separate approve endpoint triggers full processing. Next.js upload page with drag-and-drop + validation review page with classified/unclassified pages and required docs checklist. 461 tests passing. Full packet scan results in `data/packet_scan_results.md`.
+**Phase 3 in progress.** S3 storage service (Hetzner Object Storage via boto3), packet completeness validator (16-document checklist with OCR-tolerant detection), Reynolds site ID column on stores table (Alembic migration 004). Async validate-then-approve upload flow: upload saves file and returns immediately, validation runs in background with real-time progress polling (page-by-page classification streaming via GET /upload/{meeting_id}/progress). Frontend shows animated progress bar + streaming results. Separate approve endpoint triggers full processing. 461 tests passing. Full packet scan results in `data/packet_scan_results.md`.
 
 ## Reynolds Store Number Map
 

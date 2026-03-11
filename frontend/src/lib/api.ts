@@ -467,6 +467,24 @@ export interface ValidationUploadResponse {
   validation: DetailedValidationResult;
 }
 
+export interface UploadAcceptedResponse {
+  meeting_id: string;
+  store_id: string;
+  total_pages: number;
+}
+
+export interface ValidationProgressResponse {
+  status: string;
+  current_page: number;
+  total_pages: number;
+  classified_pages: ClassifiedPage[];
+  unclassified_pages: UnclassifiedPage[];
+  required_documents: RequiredDocumentCheck[];
+  completeness_percentage: number;
+  is_complete: boolean;
+  error: string | null;
+}
+
 export interface ApproveResponse {
   meeting_id: string;
   pages_extracted: number;
@@ -481,7 +499,7 @@ export async function uploadForValidation(
   storeId: string,
   meetingDate: string,
   token?: string,
-): Promise<ValidationUploadResponse> {
+): Promise<UploadAcceptedResponse> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("store_id", storeId);
@@ -507,7 +525,7 @@ export async function uploadBulkForValidation(
   storeId: string,
   meetingDate: string,
   token?: string,
-): Promise<ValidationUploadResponse> {
+): Promise<UploadAcceptedResponse> {
   const formData = new FormData();
   formData.append("store_id", storeId);
   formData.append("meeting_date", meetingDate);
@@ -526,6 +544,13 @@ export async function uploadBulkForValidation(
     throw new Error(`Upload failed: ${text}`);
   }
   return res.json();
+}
+
+export function fetchValidationProgress(
+  meetingId: string,
+  token?: string,
+): Promise<ValidationProgressResponse> {
+  return apiFetch(`/upload/${meetingId}/progress`, { token });
 }
 
 export function approveUpload(meetingId: string, token?: string): Promise<ApproveResponse> {

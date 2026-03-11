@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import (
     ApproveResponse,
+    UploadAcceptedResponse,
+    ValidationProgressResponse,
     ValidationUploadResponse,
 )
 from app.auth import (
@@ -27,6 +30,11 @@ from app.models.store import Store
 from app.models.user import User, UserRole
 from app.services.packet_validator import PacketValidator
 from app.services.processing_service import ProcessingService
+from app.services.validation_progress import (
+    ValidationProgress,
+    get_progress,
+    set_progress,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -94,17 +102,31 @@ async def _check_store_access(current_user: User, store_id: str, db: AsyncSessio
             raise HTTPException(status_code=403, detail="You do not have access to this store")
 
 
-@router.post("/upload", response_model=ValidationUploadResponse)
+def _run_validation_background(file_path: str, meeting_id: str) -> None:
+    """Run packet validation in a background thread, updating progress store."""
+    try:
+        validator = PacketValidator()
+        validator.validate_detailed_with_progress(file_path, meeting_id)
+    except Exception as e:
+        logger.exception("Background validation failed for meeting %s", meeting_id)
+        progress = get_progress(meeting_id) or ValidationProgress()
+        progress.status = "error"
+        progress.error = str(e)
+        set_progress(meeting_id, progress)
+
+
+@router.post("/upload", response_model=UploadAcceptedResponse)
 async def upload_report(
     file: UploadFile,
     store_id: str = Form(...),
     meeting_date: str = Form(...),
     current_user: User = Depends(require_corporate_or_gm),
     db: AsyncSession = Depends(get_db),
-) -> ValidationUploadResponse:
+) -> UploadAcceptedResponse:
     """
-    Upload an R&R report PDF for validation review.
-    Saves the file and runs packet validation only — does NOT process.
+    Upload an R&R report PDF for validation.
+    Saves the file, counts pages, kicks off validation in background.
+    Poll GET /upload/{meeting_id}/progress for real-time status.
     Call POST /upload/{meeting_id}/approve to trigger processing after review.
     """
     await _check_store_access(current_user, store_id, db)
@@ -121,38 +143,43 @@ async def upload_report(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Run validation only (no processing)
+    # Count pages cheaply (no text extraction)
+    validator = PacketValidator()
     try:
-        validator = PacketValidator()
-        validation = validator.validate_detailed(file_path)
-    except Exception as e:
-        logger.exception("Packet validation failed")
-        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+        total_pages = validator._count_pages(file_path)
+    except Exception:
+        total_pages = 0
+
+    # Initialize progress and start background validation
+    progress = ValidationProgress(status="uploading", total_pages=total_pages)
+    set_progress(str(meeting.id), progress)
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _run_validation_background, file_path, str(meeting.id))
 
     # Keep meeting in PENDING status until approved
     meeting.status = MeetingStatus.PENDING
     await db.commit()
 
-    return ValidationUploadResponse(
+    return UploadAcceptedResponse(
         meeting_id=str(meeting.id),
         store_id=str(store.id),
-        total_pages=validation.total_pages,
-        validation=validation,
+        total_pages=total_pages,
     )
 
 
-@router.post("/upload/bulk", response_model=ValidationUploadResponse)
+@router.post("/upload/bulk", response_model=UploadAcceptedResponse)
 async def upload_bulk_reports(
     files: list[UploadFile],
     store_id: str = Form(...),
     meeting_date: str = Form(...),
     current_user: User = Depends(require_corporate_or_gm),
     db: AsyncSession = Depends(get_db),
-) -> ValidationUploadResponse:
+) -> UploadAcceptedResponse:
     """
     Upload multiple R&R report PDFs for the same meeting.
-    Saves files and runs validation only — does NOT process.
-    Call POST /upload/{meeting_id}/approve to trigger processing after review.
+    Saves files, kicks off validation in background.
+    Poll GET /upload/{meeting_id}/progress for real-time status.
     """
     await _check_store_access(current_user, store_id, db)
 
@@ -176,22 +203,50 @@ async def upload_bulk_reports(
             f.write(content)
         last_file_path = file_path
 
-    # Validate the last uploaded file (primary packet)
+    # Count pages cheaply
+    validator = PacketValidator()
     try:
-        validator = PacketValidator()
-        validation = validator.validate_detailed(last_file_path)
-    except Exception as e:
-        logger.exception("Packet validation failed for bulk upload")
-        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+        total_pages = validator._count_pages(last_file_path)
+    except Exception:
+        total_pages = 0
+
+    # Initialize progress and start background validation
+    progress = ValidationProgress(status="uploading", total_pages=total_pages)
+    set_progress(str(meeting.id), progress)
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _run_validation_background, last_file_path, str(meeting.id))
 
     meeting.status = MeetingStatus.PENDING
     await db.commit()
 
-    return ValidationUploadResponse(
+    return UploadAcceptedResponse(
         meeting_id=str(meeting.id),
         store_id=str(store.id),
-        total_pages=validation.total_pages,
-        validation=validation,
+        total_pages=total_pages,
+    )
+
+
+@router.get("/upload/{meeting_id}/progress", response_model=ValidationProgressResponse)
+async def get_validation_progress(
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+) -> ValidationProgressResponse:
+    """Get real-time validation progress for a meeting upload."""
+    progress = get_progress(meeting_id)
+    if progress is None:
+        raise HTTPException(status_code=404, detail="No validation in progress for this meeting")
+
+    return ValidationProgressResponse(
+        status=progress.status,
+        current_page=progress.current_page,
+        total_pages=progress.total_pages,
+        classified_pages=progress.classified_pages,
+        unclassified_pages=progress.unclassified_pages,
+        required_documents=progress.required_documents,
+        completeness_percentage=progress.completeness_percentage,
+        is_complete=progress.is_complete,
+        error=progress.error,
     )
 
 

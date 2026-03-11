@@ -62,12 +62,12 @@ def _mock_processing_result(meeting_id: str) -> dict:
 class TestUploadEndpoint:
 
     async def test_upload_with_valid_pdf(self, client, sample_store, auth_headers):
-        """Upload a valid PDF and get validation results (no processing)."""
-        mock_val = _mock_validation_result()
-
-        with patch("app.api.routes.upload.PacketValidator") as MockValidator:
+        """Upload a valid PDF and get accepted response (validation runs in background)."""
+        with patch("app.api.routes.upload.PacketValidator") as MockValidator, \
+             patch("app.api.routes.upload.asyncio") as mock_asyncio:
             instance = MockValidator.return_value
-            instance.validate_detailed = MagicMock(return_value=mock_val)
+            instance._count_pages = MagicMock(return_value=3)
+            mock_asyncio.get_event_loop.return_value.run_in_executor = MagicMock()
 
             response = await client.post(
                 UPLOAD_URL,
@@ -81,9 +81,7 @@ class TestUploadEndpoint:
         assert "meeting_id" in data
         assert data["store_id"] == STORE_ID
         assert data["total_pages"] == 3
-        assert data["validation"]["completeness_percentage"] == 12.5
-        assert len(data["validation"]["classified_pages"]) == 2
-        assert len(data["validation"]["unclassified_pages"]) == 1
+        assert "validation" not in data  # validation now runs async
 
     async def test_upload_non_pdf_returns_422(self, client, sample_store, auth_headers):
         """Uploading a non-PDF file returns 422."""
@@ -130,11 +128,11 @@ class TestUploadEndpoint:
 
     async def test_upload_creates_meeting_if_not_exists(self, client, sample_store, auth_headers):
         """First upload for a store+date combo creates a new meeting."""
-        mock_val = _mock_validation_result()
-
-        with patch("app.api.routes.upload.PacketValidator") as MockValidator:
+        with patch("app.api.routes.upload.PacketValidator") as MockValidator, \
+             patch("app.api.routes.upload.asyncio") as mock_asyncio:
             instance = MockValidator.return_value
-            instance.validate_detailed = MagicMock(return_value=mock_val)
+            instance._count_pages = MagicMock(return_value=3)
+            mock_asyncio.get_event_loop.return_value.run_in_executor = MagicMock()
 
             response = await client.post(
                 UPLOAD_URL,
@@ -148,11 +146,11 @@ class TestUploadEndpoint:
 
     async def test_upload_reuses_existing_meeting(self, client, sample_store, sample_meeting, auth_headers):
         """Uploading to an existing store+date reuses the meeting."""
-        mock_val = _mock_validation_result()
-
-        with patch("app.api.routes.upload.PacketValidator") as MockValidator:
+        with patch("app.api.routes.upload.PacketValidator") as MockValidator, \
+             patch("app.api.routes.upload.asyncio") as mock_asyncio:
             instance = MockValidator.return_value
-            instance.validate_detailed = MagicMock(return_value=mock_val)
+            instance._count_pages = MagicMock(return_value=3)
+            mock_asyncio.get_event_loop.return_value.run_in_executor = MagicMock()
 
             response = await client.post(
                 UPLOAD_URL,
@@ -178,12 +176,12 @@ class TestUploadEndpoint:
 class TestBulkUploadEndpoint:
 
     async def test_bulk_upload_multiple_files(self, client, sample_store, auth_headers):
-        """Bulk upload with multiple PDFs saves files and returns validation."""
-        mock_val = _mock_validation_result()
-
-        with patch("app.api.routes.upload.PacketValidator") as MockValidator:
+        """Bulk upload with multiple PDFs saves files and returns accepted response."""
+        with patch("app.api.routes.upload.PacketValidator") as MockValidator, \
+             patch("app.api.routes.upload.asyncio") as mock_asyncio:
             instance = MockValidator.return_value
-            instance.validate_detailed = MagicMock(return_value=mock_val)
+            instance._count_pages = MagicMock(return_value=3)
+            mock_asyncio.get_event_loop.return_value.run_in_executor = MagicMock()
 
             response = await client.post(
                 BULK_URL,
@@ -199,7 +197,7 @@ class TestBulkUploadEndpoint:
         data = response.json()
         assert "meeting_id" in data
         assert data["total_pages"] == 3
-        assert "validation" in data
+        assert "validation" not in data  # validation now runs async
 
     async def test_bulk_upload_non_pdf_rejected(self, client, sample_store, auth_headers):
         """Bulk upload rejects non-PDF files."""
