@@ -102,7 +102,7 @@ The parser framework processes R&R DMS PDF exports through a three-layer pipelin
 PDF Upload → PDFExtractor → ParserRouter → [InventoryParser, PartsParser, FinancialParser, OperationsParser] → ProcessingService → Database
 ```
 
-**PDFExtractor** (`parsers/pdf_extractor.py`) — Uses pdfplumber to extract text, lines, and tables from each PDF page into a standardized page dict format. Falls back to OCR (EasyOCR + pypdfium2) for scanned pages with no text layer. Detects landscape pages and retries with 90° rotation.
+**PDFExtractor** (`parsers/pdf_extractor.py`) — Uses pdfplumber to extract text, lines, and tables from each PDF page into a standardized page dict format. Falls back to OCR (tesseract + pypdfium2) for scanned pages with no text layer. Detects landscape pages and retries with 90° rotation.
 
 **ParserRouter** (`parsers/router.py`) — Routes pages to parsers based on section identifiers. Each page is matched to parser(s) that recognize its content. Unhandled pages are tracked for logging.
 
@@ -430,7 +430,7 @@ cd backend && python3 -m pytest tests/ -v
 
 **Production data seeded.** 24 dealership stores loaded (including CAP GM). Bryan Brookes promoted to corporate role. 17 test packet PDFs uploaded and analyzed — Reynolds store numbers extracted for 15 of 24 stores. Reynolds 7-digit site IDs stored on all 17 stores with R&R accounts.
 
-**Phase 3 in progress.** S3 storage service (Hetzner Object Storage via boto3), packet completeness validator (16-document checklist with OCR-tolerant detection), Reynolds site ID column on stores table (Alembic migration 004). Async validate-then-approve upload flow: upload saves file and returns immediately, validation runs in background with real-time progress polling (page-by-page classification streaming via GET /upload/{meeting_id}/progress). Frontend shows animated progress bar + streaming results. Separate approve endpoint triggers full processing. 461 tests passing. Full packet scan results in `data/packet_scan_results.md`.
+**Phase 3 in progress.** S3 storage service (Hetzner Object Storage via boto3), packet completeness validator (16-document checklist with OCR-tolerant detection), Reynolds site ID column on stores table (Alembic migration 004). Async validate-then-approve upload flow: upload saves file and returns immediately, validation runs in background with real-time progress polling (page-by-page classification streaming via GET /upload/{meeting_id}/progress). Frontend shows animated progress bar + streaming results. Separate approve endpoint triggers full processing. 461 tests passing. Full packet scan results in `data/packet_scan_results.md`. Alembic migration 005 adds `previous_flag_id` and `escalation_level` to flags table for recurring flag tracking.
 
 ## Reynolds Store Number Map
 
