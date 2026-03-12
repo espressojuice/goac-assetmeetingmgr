@@ -423,15 +423,14 @@ class PacketValidator:
     _OCR_THRESHOLD = 50
 
     def _extract_text(self, source: Union[str, bytes, Path]) -> list[str]:
-        """Extract text from each page of the PDF, with OCR fallback for scanned pages."""
+        """Extract text from each page of the PDF, with fast OCR fallback for scanned pages.
+
+        Uses pytesseract (tesseract-ocr) for OCR instead of EasyOCR — much faster on CPU
+        since we only need enough text to classify pages, not high-quality data extraction.
+        """
+        import io
         import os
         import tempfile
-
-        from app.parsers.pdf_extractor import (
-            _build_text_and_tables,
-            _is_landscape_content,
-            _ocr_page_detailed,
-        )
 
         pages_text: list[str] = []
         tmp_path: str | None = None
@@ -439,10 +438,7 @@ class PacketValidator:
 
         try:
             if isinstance(source, bytes):
-                import io
-
-                pdf_file = io.BytesIO(source)
-                # Write to temp file for OCR fallback
+                pdf_file: object = io.BytesIO(source)
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
                     f.write(source)
                     tmp_path = f.name
@@ -457,18 +453,11 @@ class PacketValidator:
 
                     # OCR fallback for blank/near-blank pages
                     if len(text.strip()) < self._OCR_THRESHOLD and tmp_path:
-                        ocr_results = _ocr_page_detailed(tmp_path, i)
-
-                        if _is_landscape_content(ocr_results):
-                            ocr_rotated = _ocr_page_detailed(tmp_path, i, rotation=90)
-                            if not _is_landscape_content(ocr_rotated) and len(ocr_rotated) > 0:
-                                ocr_results = ocr_rotated
-
-                        ocr_text, _ = _build_text_and_tables(ocr_results)
+                        ocr_text = self._tesseract_ocr_page(tmp_path, i)
                         if ocr_text and len(ocr_text.strip()) > len(text.strip()):
                             text = ocr_text
                             logger.info(
-                                "Page %d: used OCR fallback (%d chars)", i + 1, len(text)
+                                "Page %d: used tesseract OCR (%d chars)", i + 1, len(text)
                             )
 
                     pages_text.append(text)
@@ -482,6 +471,31 @@ class PacketValidator:
                     pass
 
         return pages_text
+
+    @staticmethod
+    def _tesseract_ocr_page(pdf_path: str, page_index: int) -> str:
+        """Render a single PDF page and run tesseract OCR on it.
+
+        Returns extracted text string, or empty string on failure.
+        """
+        try:
+            import pypdfium2 as pdfium
+            import pytesseract
+        except ImportError:
+            logger.warning("pytesseract or pypdfium2 not installed — OCR unavailable")
+            return ""
+
+        try:
+            pdf = pdfium.PdfDocument(pdf_path)
+            page = pdf[page_index]
+            bitmap = page.render(scale=2)
+            img = bitmap.to_pil()
+            pdf.close()
+
+            return pytesseract.image_to_string(img)
+        except Exception:
+            logger.exception("Tesseract OCR failed for page %d", page_index + 1)
+            return ""
 
     @staticmethod
     def _is_summary_cover_page(text: str) -> bool:

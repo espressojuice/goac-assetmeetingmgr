@@ -15,7 +15,7 @@ import {
 } from "@/lib/api";
 
 const POLL_INTERVAL = 2000; // 2 seconds
-const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 export default function ValidationReviewPage() {
   const { storeId, meetingId } = useParams<{ storeId: string; meetingId: string }>();
@@ -47,7 +47,7 @@ export default function ValidationReviewPage() {
 
     // Timeout check
     if (Date.now() - startTimeRef.current > TIMEOUT_MS) {
-      setError("Validation timed out after 5 minutes. Please try re-uploading.");
+      setError("Validation timed out after 10 minutes. Please try re-uploading.");
       setStatus("error");
       return;
     }
@@ -216,8 +216,8 @@ export default function ValidationReviewPage() {
           </div>
         )}
 
-        {/* Unclassified Pages */}
-        {validationDone && (
+        {/* Unclassified Pages — only show when validation completed successfully */}
+        {status === "complete" && (
           <div className={`rounded-lg shadow border mb-6 ${
             unclassifiedPages.length > 0
               ? "bg-yellow-50 border-yellow-200"
@@ -296,6 +296,18 @@ export default function ValidationReviewPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Error action — offer re-upload when validation failed/timed out */}
+        {status === "error" && (
+          <div className="flex items-center justify-center bg-white rounded-lg shadow p-4 border border-gray-200">
+            <Link
+              href={`/stores/${storeId}/upload`}
+              className="text-sm bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2 rounded transition-colors"
+            >
+              Re-upload Packet
+            </Link>
           </div>
         )}
 
