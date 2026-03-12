@@ -44,7 +44,7 @@ services:
       - "traefik.http.services.goac-api.loadbalancer.server.port=8000"
       - "traefik.http.routers.goac-api.priority=2"
     restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 
   frontend:
     build:

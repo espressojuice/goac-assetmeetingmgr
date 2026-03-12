@@ -21,6 +21,5 @@ sendgrid
 apscheduler
 tzdata
 boto3
-easyocr
 pypdfium2
 pytesseract

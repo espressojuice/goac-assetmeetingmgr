@@ -319,7 +319,12 @@ class PacketValidator:
         """Validate a PDF page-by-page, updating progress store after each page.
 
         Same result as validate_detailed() but streams progress to the in-memory store.
+        Extracts and classifies one page at a time so progress updates during OCR.
         """
+        import io
+        import os
+        import tempfile
+
         from app.services.validation_progress import ValidationProgress, set_progress
 
         progress = ValidationProgress(status="counting_pages")
@@ -331,66 +336,101 @@ class PacketValidator:
         progress.status = "validating"
         set_progress(meeting_id, progress)
 
+        # Prepare file handles for page-by-page extraction
+        tmp_path: str | None = None
+        created_tmp = False
+        if isinstance(source, bytes):
+            pdf_file: object = io.BytesIO(source)
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                f.write(source)
+                tmp_path = f.name
+                created_tmp = True
+        else:
+            pdf_file = str(source)
+            tmp_path = str(source)
+
         # Extract and classify page by page
         classified_pages: list[ClassifiedPage] = []
         unclassified_pages: list[UnclassifiedPage] = []
         doc_pages: dict[int, list[int]] = {}
+        found_count = 0
+        required_documents: list[RequiredDocumentCheck] = []
 
-        pages_text = self._extract_text(source)
+        try:
+            with pdfplumber.open(pdf_file) as pdf:
+                for page_idx, page in enumerate(pdf.pages):
+                    page_num = page_idx + 1
+                    progress.current_page = page_num
+                    set_progress(meeting_id, progress)
 
-        for page_idx, text in enumerate(pages_text):
-            page_num = page_idx + 1
-            progress.current_page = page_num
+                    # Extract text (with OCR fallback) for this single page
+                    text = page.extract_text() or ""
+                    if len(text.strip()) < self._OCR_THRESHOLD and tmp_path:
+                        ocr_text = self._tesseract_ocr_page(tmp_path, page_idx)
+                        if ocr_text and len(ocr_text.strip()) > len(text.strip()):
+                            text = ocr_text
+                            logger.info(
+                                "Page %d: used tesseract OCR (%d chars)", page_num, len(text)
+                            )
 
-            if not text or not text.strip():
-                up = UnclassifiedPage(page_number=page_num, snippet="(blank page)")
-                unclassified_pages.append(up)
-                progress.unclassified_pages.append(up.model_dump())
-            else:
-                best_doc_id, best_score = self._classify_page_with_score(text)
-                if best_doc_id is not None:
-                    doc_name = next(
-                        name for did, name, _, _, _ in _DOCUMENT_DEFS if did == best_doc_id
-                    )
-                    cp = ClassifiedPage(
-                        page_number=page_num,
-                        document_type=doc_name,
-                        confidence=best_score,
-                    )
-                    classified_pages.append(cp)
-                    doc_pages.setdefault(best_doc_id, []).append(page_num)
-                    progress.classified_pages.append(cp.model_dump())
-                else:
-                    snippet = ""
-                    for line in text.split("\n"):
-                        stripped = line.strip()
-                        if stripped:
-                            snippet = stripped[:120]
-                            break
-                    up = UnclassifiedPage(
-                        page_number=page_num, snippet=snippet or "(no readable text)"
-                    )
-                    unclassified_pages.append(up)
-                    progress.unclassified_pages.append(up.model_dump())
+                    # Classify this page
+                    if not text or not text.strip():
+                        up = UnclassifiedPage(page_number=page_num, snippet="(blank page)")
+                        unclassified_pages.append(up)
+                        progress.unclassified_pages.append(up.model_dump())
+                    else:
+                        best_doc_id, best_score = self._classify_page_with_score(text)
+                        if best_doc_id is not None:
+                            doc_name = next(
+                                name for did, name, _, _, _ in _DOCUMENT_DEFS if did == best_doc_id
+                            )
+                            cp = ClassifiedPage(
+                                page_number=page_num,
+                                document_type=doc_name,
+                                confidence=best_score,
+                            )
+                            classified_pages.append(cp)
+                            doc_pages.setdefault(best_doc_id, []).append(page_num)
+                            progress.classified_pages.append(cp.model_dump())
+                        else:
+                            snippet = ""
+                            for line in text.split("\n"):
+                                stripped = line.strip()
+                                if stripped:
+                                    snippet = stripped[:120]
+                                    break
+                            up = UnclassifiedPage(
+                                page_number=page_num, snippet=snippet or "(no readable text)"
+                            )
+                            unclassified_pages.append(up)
+                            progress.unclassified_pages.append(up.model_dump())
 
-            # Update required documents checklist after each page
-            required_documents: list[RequiredDocumentCheck] = []
-            found_count = 0
-            for doc_id, name, where_to_find, _, _ in _DOCUMENT_DEFS:
-                found = doc_id in doc_pages
-                if found:
-                    found_count += 1
-                required_documents.append(RequiredDocumentCheck(
-                    name=name,
-                    found=found,
-                    page_numbers=sorted(doc_pages.get(doc_id, [])),
-                    where_to_find=where_to_find,
-                ))
+                    # Update required documents checklist after each page
+                    required_documents = []
+                    found_count = 0
+                    for doc_id, name, where_to_find, _, _ in _DOCUMENT_DEFS:
+                        found = doc_id in doc_pages
+                        if found:
+                            found_count += 1
+                        required_documents.append(RequiredDocumentCheck(
+                            name=name,
+                            found=found,
+                            page_numbers=sorted(doc_pages.get(doc_id, [])),
+                            where_to_find=where_to_find,
+                        ))
 
-            completeness = (found_count / len(_DOCUMENT_DEFS)) * 100.0 if _DOCUMENT_DEFS else 0.0
-            progress.required_documents = [rd.model_dump() for rd in required_documents]
-            progress.completeness_percentage = round(completeness, 1)
-            set_progress(meeting_id, progress)
+                    completeness = (found_count / len(_DOCUMENT_DEFS)) * 100.0 if _DOCUMENT_DEFS else 0.0
+                    progress.required_documents = [rd.model_dump() for rd in required_documents]
+                    progress.completeness_percentage = round(completeness, 1)
+                    set_progress(meeting_id, progress)
+        except Exception:
+            logger.warning("Failed during page-by-page validation", exc_info=True)
+        finally:
+            if created_tmp and tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
         # Final result
         progress.status = "complete"
