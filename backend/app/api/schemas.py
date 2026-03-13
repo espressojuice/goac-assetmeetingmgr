@@ -445,3 +445,42 @@ class MeetingDataResponse(BaseModel):
     meeting_id: str
     category: str
     data: dict[str, list[dict]]
+
+
+# --- Flag Rules (Per-Store Overrides) ---
+
+class FlagRuleResponse(BaseModel):
+    """A single flag rule with effective thresholds for a specific store."""
+    rule_name: str
+    category: str
+    default_yellow: Optional[float] = None
+    default_red: Optional[float] = None
+    effective_yellow: Optional[float] = None
+    effective_red: Optional[float] = None
+    has_override: bool
+    enabled: bool
+
+
+class FlagRuleOverrideRequest(BaseModel):
+    """Request body for PUT /stores/{store_id}/flag-rules/{rule_name}."""
+    yellow_threshold: Optional[float] = None
+    red_threshold: Optional[float] = None
+    enabled: bool = True
+
+
+# --- Flag Verification ---
+
+class FlagVerifyRequest(BaseModel):
+    """Request body for POST /flags/{flag_id}/verify."""
+    status: str = Field(..., pattern="^(verified|unresolved)$")
+    verification_notes: Optional[str] = None
+    expected_resolution_date: Optional[datetime.date] = None
+
+
+class FlagVerifyResponse(BaseModel):
+    id: str
+    status: str
+    verified_by_id: str
+    verified_at: str
+    verification_notes: Optional[str] = None
+    expected_resolution_date: Optional[str] = None

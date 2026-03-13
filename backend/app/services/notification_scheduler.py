@@ -258,6 +258,102 @@ class NotificationScheduler:
         return sent_count
 
     # ------------------------------------------------------------------ #
+    # Pre-meeting reminders (runs daily)
+    # ------------------------------------------------------------------ #
+    async def check_pre_meeting_reminders(self, db: AsyncSession) -> int:
+        """Send reminders for unanswered flags when a meeting is today or tomorrow.
+
+        For each meeting scheduled today or tomorrow, finds flags with
+        status=OPEN that are assigned to someone but not yet responded.
+        Creates a DEADLINE_REMINDER notification (and sends email) for
+        each such user, but only once per flag per user.
+
+        Returns count of reminders sent.
+        """
+        from zoneinfo import ZoneInfo
+
+        now_ct = datetime.datetime.now(ZoneInfo("US/Central"))
+        today = now_ct.date()
+        tomorrow = today + datetime.timedelta(days=1)
+
+        # Find meetings scheduled for today or tomorrow
+        meeting_query = select(Meeting).where(
+            Meeting.meeting_date.in_([today, tomorrow]),
+        )
+        meeting_result = await db.execute(meeting_query)
+        meetings = list(meeting_result.scalars().all())
+
+        if not meetings:
+            return 0
+
+        sent_count = 0
+        for meeting in meetings:
+            # Find OPEN flags for this meeting that are assigned
+            query = (
+                select(FlagAssignment, Flag, Store, User)
+                .join(Flag, FlagAssignment.flag_id == Flag.id)
+                .join(Store, Flag.store_id == Store.id)
+                .join(User, FlagAssignment.assigned_to_id == User.id)
+                .where(
+                    and_(
+                        Flag.meeting_id == meeting.id,
+                        Flag.status == FlagStatus.OPEN,
+                        FlagAssignment.status.in_([
+                            AssignmentStatus.PENDING,
+                            AssignmentStatus.ACKNOWLEDGED,
+                        ]),
+                    )
+                )
+            )
+            result = await db.execute(query)
+            rows = result.all()
+
+            for assignment, flag, store, user in rows:
+                # Check if reminder already sent for this flag+user
+                existing = await db.execute(
+                    select(Notification).where(
+                        and_(
+                            Notification.reference_id == flag.id,
+                            Notification.notification_type == NotificationType.DEADLINE_REMINDER,
+                            Notification.user_id == user.id,
+                            Notification.title == "Pre-Meeting Response Needed",
+                        )
+                    )
+                )
+                if existing.scalar_one_or_none():
+                    continue
+
+                meeting_date_str = meeting.meeting_date.strftime("%B %d, %Y")
+                message = (
+                    f"You have unanswered flags for the {store.name} asset meeting "
+                    f"on {meeting_date_str}. Please respond before the meeting."
+                )
+
+                notification = Notification(
+                    user_id=user.id,
+                    notification_type=NotificationType.DEADLINE_REMINDER,
+                    title="Pre-Meeting Response Needed",
+                    message=message,
+                    reference_id=flag.id,
+                    email_sent=True,
+                )
+                db.add(notification)
+
+                # Send email
+                await self.email.send_reminder_approaching(
+                    user, flag, meeting, store,
+                    hours_remaining=24 if meeting.meeting_date == tomorrow else 0,
+                )
+
+                sent_count += 1
+
+        if sent_count > 0:
+            await db.commit()
+            logger.info("Sent %d pre-meeting reminders", sent_count)
+
+        return sent_count
+
+    # ------------------------------------------------------------------ #
     # Daily digest (runs Mon-Fri at 7:30 AM CT)
     # ------------------------------------------------------------------ #
     async def run_daily_digest(self, db: AsyncSession) -> int:

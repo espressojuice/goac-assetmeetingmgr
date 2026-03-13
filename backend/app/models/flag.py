@@ -3,7 +3,7 @@ import enum
 import uuid
 from typing import Optional
 
-from sqlalchemy import Integer, String, Text, DateTime, Enum, ForeignKey, Index, func
+from sqlalchemy import Integer, String, Text, Date, DateTime, Enum, ForeignKey, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -24,6 +24,8 @@ class FlagSeverity(str, enum.Enum):
 class FlagStatus(str, enum.Enum):
     OPEN = "open"
     RESPONDED = "responded"
+    VERIFIED = "verified"
+    UNRESOLVED = "unresolved"
     ESCALATED = "escalated"
 
 
@@ -45,12 +47,17 @@ class Flag(Base):
     responded_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     previous_flag_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("flags.id"), nullable=True)
     escalation_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expected_resolution_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
+    verified_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     meeting: Mapped["Meeting"] = relationship(back_populates="flags")
     store: Mapped["Store"] = relationship()
+    verified_by_user: Mapped[Optional["User"]] = relationship(foreign_keys=[verified_by_id])
 
     __table_args__ = (
         Index("ix_flags_meeting_id", "meeting_id"),

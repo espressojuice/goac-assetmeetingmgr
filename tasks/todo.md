@@ -404,3 +404,53 @@
 - Updated config.py (5 S3 settings), .env.example, requirements.txt (boto3)
 - Updated schemas.py (FoundDocument, MissingDocument, PacketValidationResult)
 - 459 tests passing (all previous + new code paths)
+
+# Phase 4A Tasks — Core Meeting Workflow
+
+## Task 1: Per-Store Configurable Flagging Thresholds
+- [x] Create StoreFlagOverride model (backend/app/models/store_flag_override.py)
+- [x] Register model in backend/app/models/__init__.py
+- [x] Create Alembic migration 006_store_flag_overrides.py
+- [x] Modify FlaggingEngine.evaluate_meeting() to accept store_overrides dict
+- [x] Add _apply_override() method to FlaggingEngine (dataclass replace, no mutation)
+- [x] Add FlagRuleResponse and FlagRuleOverrideRequest schemas
+- [x] Create flag_rules.py API routes (GET/PUT/DELETE per-store rules)
+- [x] Register flag_rules router in main.py
+- [x] Update ProcessingService.process_upload() to load overrides before flagging
+- [x] Update ProcessingService.process_upload_from_bytes() to load overrides
+- [x] Write API tests (16 tests in test_flag_rules.py)
+- [x] Write engine override tests (10 tests in test_engine_overrides.py)
+- [x] All 487 tests passing (26 new, 0 regressions)
+
+### Session 22 — 2026-03-13 (Phase 4A Tasks 1 & 2)
+- **Task 1**: Built per-store flagging threshold override system (R1 from meeting notes)
+- StoreFlagOverride model: store_id + rule_name unique constraint, nullable yellow/red thresholds, enabled flag
+- FlaggingEngine._apply_override() uses dataclass replace — never mutates original FlagRule
+- Disabled rules (enabled=False) are skipped entirely during evaluation
+- Null override thresholds fall through to defaults (partial overrides supported)
+- 3 API endpoints: GET all 15 rules with effective thresholds, PUT upsert override, DELETE revert to defaults
+- Corporate and GM can PUT/DELETE; Manager blocked (403); unauthenticated blocked (401)
+- ProcessingService loads StoreFlagOverride records before calling FlaggingEngine
+- 487 tests passing (26 new: 16 API + 10 engine)
+- **Task 2**: Pre-meeting question workflow enhancements (R2, R3, R4)
+- Added VERIFIED and UNRESOLVED to FlagStatus enum (answers don't auto-clear — GM/controller must verify)
+- Flag verification fields: verified_by_id (FK→users), verified_at, verification_notes, expected_resolution_date
+- FlagAssignment.expected_resolution_date for controller follow-up promise dates
+- Alembic migration 007: ALTER TYPE flagstatus ADD VALUE for PostgreSQL enum, 5 new columns
+- POST /flags/{flag_id}/verify endpoint: corporate/GM only, flag must be RESPONDED first
+- Propagates expected_resolution_date to active FlagAssignment records
+- NotificationScheduler.check_pre_meeting_reminders(): sends reminders for OPEN flags when meeting is today/tomorrow
+- 499 tests passing (12 new: 9 API verification + 3 pre-meeting reminders)
+
+## Task 2: Pre-Meeting Question Workflow Enhancements
+- [x] Add VERIFIED and UNRESOLVED values to FlagStatus enum
+- [x] Add verification fields to Flag model (expected_resolution_date, verified_by_id, verified_at, verification_notes)
+- [x] Add expected_resolution_date to FlagAssignment model
+- [x] Create Alembic migration 007_flag_verification_fields.py (enum ALTER TYPE + new columns)
+- [x] Add FlagVerifyRequest and FlagVerifyResponse schemas
+- [x] Add POST /flags/{flag_id}/verify endpoint (corporate/GM only, requires RESPONDED status)
+- [x] Verify endpoint propagates expected_resolution_date to active FlagAssignment
+- [x] Add check_pre_meeting_reminders() to NotificationScheduler (meetings today/tomorrow)
+- [x] Write 9 API tests for flag verification (test_flag_verification.py)
+- [x] Write 3 service tests for pre-meeting reminders (test_pre_meeting_reminders.py)
+- [x] All 499 tests passing (12 new, 0 regressions)

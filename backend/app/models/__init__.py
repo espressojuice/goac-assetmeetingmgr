@@ -32,6 +32,7 @@ from app.models.accountability import (
     AssignmentStatus,
     NotificationType,
 )
+from app.models.store_flag_override import StoreFlagOverride
 
 __all__ = [
     # Core
@@ -76,4 +77,6 @@ __all__ = [
     "MeetingAttendance",
     "AssignmentStatus",
     "NotificationType",
+    # Store Flag Overrides
+    "StoreFlagOverride",
 ]

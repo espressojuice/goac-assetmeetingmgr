@@ -19,6 +19,8 @@ from app.api.schemas import (
     FlagRespondWorkflowRequest,
     FlagResponse,
     FlagStatsResponse,
+    FlagVerifyRequest,
+    FlagVerifyResponse,
     MyFlagResponse,
     OverdueFlagResponse,
 )
@@ -27,7 +29,7 @@ from app.database import get_db
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
 from app.models.meeting import Meeting
 from app.models.user import User, UserRole
-from app.models.accountability import FlagAssignment
+from app.models.accountability import AssignmentStatus, FlagAssignment
 from app.services.flag_service import FlagService
 
 router = APIRouter()
@@ -448,3 +450,61 @@ async def auto_assign_meeting_flags(
     )
     await db.commit()
     return result
+
+
+# ------------------------------------------------------------------
+# Flag verification (during/after meeting)
+# ------------------------------------------------------------------
+
+@router.post("/flags/{flag_id}/verify", response_model=FlagVerifyResponse)
+async def verify_flag(
+    flag_id: str,
+    body: FlagVerifyRequest,
+    current_user: User = Depends(require_role(UserRole.CORPORATE, UserRole.GM)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a responded flag as verified or unresolved. Corporate/GM only."""
+    flag_uuid = _validate_uuid(flag_id, "flag_id")
+    flag = await _check_flag_store_access(flag_uuid, current_user, db)
+
+    if flag.status != FlagStatus.RESPONDED:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Flag must be in 'responded' status to verify (current: {flag.status.value})",
+        )
+
+    new_status = FlagStatus.VERIFIED if body.status == "verified" else FlagStatus.UNRESOLVED
+    now = datetime.now(ZoneInfo("US/Central"))
+
+    flag.status = new_status
+    flag.verified_by_id = current_user.id
+    flag.verified_at = now
+    if body.verification_notes is not None:
+        flag.verification_notes = body.verification_notes
+    if body.expected_resolution_date is not None:
+        flag.expected_resolution_date = body.expected_resolution_date
+        # Also propagate to active FlagAssignment
+        assignment_result = await db.execute(
+            select(FlagAssignment).where(
+                FlagAssignment.flag_id == flag.id,
+                FlagAssignment.status.in_([
+                    AssignmentStatus.PENDING,
+                    AssignmentStatus.ACKNOWLEDGED,
+                    AssignmentStatus.RESPONDED,
+                ]),
+            )
+        )
+        for assignment in assignment_result.scalars().all():
+            assignment.expected_resolution_date = body.expected_resolution_date
+
+    await db.commit()
+    await db.refresh(flag)
+
+    return FlagVerifyResponse(
+        id=str(flag.id),
+        status=flag.status.value,
+        verified_by_id=str(flag.verified_by_id),
+        verified_at=flag.verified_at.isoformat(),
+        verification_notes=flag.verification_notes,
+        expected_resolution_date=str(flag.expected_resolution_date) if flag.expected_resolution_date else None,
+    )

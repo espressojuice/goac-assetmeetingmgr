@@ -139,9 +139,19 @@ class ProcessingService:
         await db.flush()
         logger.info(f"Saved records: {record_counts}")
 
+        # Load per-store flag rule overrides
+        from app.models.store_flag_override import StoreFlagOverride
+        override_result = await db.execute(
+            select(StoreFlagOverride).where(StoreFlagOverride.store_id == store_uuid)
+        )
+        store_overrides = {o.rule_name: o for o in override_result.scalars().all()}
+
         # Run flagging engine
         engine = FlaggingEngine()
-        flags = await engine.evaluate_meeting(str(meeting_uuid), str(store_uuid), db)
+        flags = await engine.evaluate_meeting(
+            str(meeting_uuid), str(store_uuid), db,
+            store_overrides=store_overrides,
+        )
         for flag in flags:
             db.add(flag)
 
@@ -283,9 +293,19 @@ class ProcessingService:
 
         await db.flush()
 
+        # Load per-store flag rule overrides
+        from app.models.store_flag_override import StoreFlagOverride
+        override_result2 = await db.execute(
+            select(StoreFlagOverride).where(StoreFlagOverride.store_id == store_uuid)
+        )
+        store_overrides2 = {o.rule_name: o for o in override_result2.scalars().all()}
+
         # Run flagging engine
         engine = FlaggingEngine()
-        flags = await engine.evaluate_meeting(str(meeting_uuid), str(store_uuid), db)
+        flags = await engine.evaluate_meeting(
+            str(meeting_uuid), str(store_uuid), db,
+            store_overrides=store_overrides2,
+        )
         for flag in flags:
             db.add(flag)
 

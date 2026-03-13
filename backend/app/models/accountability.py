@@ -34,6 +34,7 @@ class FlagAssignment(Base):
     assigned_by_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     status: Mapped[AssignmentStatus] = mapped_column(Enum(AssignmentStatus), default=AssignmentStatus.PENDING, nullable=False)
     deadline: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    expected_resolution_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

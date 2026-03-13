@@ -55,14 +55,24 @@ class FlaggingEngine:
         self.rules = rules or DEFAULT_RULES
 
     async def evaluate_meeting(
-        self, meeting_id: str, store_id: str, db: AsyncSession
+        self,
+        meeting_id: str,
+        store_id: str,
+        db: AsyncSession,
+        store_overrides: Optional[dict] = None,
     ) -> list[Flag]:
         """
         Run all enabled rules against parsed data for a meeting.
+
+        Args:
+            store_overrides: dict keyed by rule_name → StoreFlagOverride.
+                If an override exists and enabled=False, the rule is skipped.
+                If an override has non-null threshold values, they replace defaults.
         Returns list of Flag model instances (not yet committed).
         """
         meeting_uuid = uuid.UUID(meeting_id) if isinstance(meeting_id, str) else meeting_id
         store_uuid = uuid.UUID(store_id) if isinstance(store_id, str) else store_id
+        overrides = store_overrides or {}
 
         flags: list[Flag] = []
 
@@ -70,12 +80,22 @@ class FlaggingEngine:
             if not rule.enabled:
                 continue
 
+            override = overrides.get(rule.name)
+
+            # If override exists and is disabled, skip the rule
+            if override and not override.enabled:
+                logger.info(f"Rule '{rule.name}' disabled by store override")
+                continue
+
+            # Build effective rule with override thresholds
+            effective_rule = self._apply_override(rule, override)
+
             records = await self._get_records(rule.model, meeting_uuid, db)
 
             for record in records:
-                severity = self._evaluate_record(record, rule)
+                severity = self._evaluate_record(record, effective_rule)
                 if severity:
-                    flag = self._create_flag(record, rule, severity, store_uuid, meeting_uuid)
+                    flag = self._create_flag(record, effective_rule, severity, store_uuid, meeting_uuid)
                     flags.append(flag)
 
         logger.info(
@@ -84,6 +104,16 @@ class FlaggingEngine:
             f"{sum(1 for f in flags if f.severity == FlagSeverity.YELLOW)} yellow)"
         )
         return flags
+
+    @staticmethod
+    def _apply_override(rule: FlagRule, override) -> FlagRule:
+        """Return a new FlagRule with override thresholds applied (if any)."""
+        if not override:
+            return rule
+        from dataclasses import replace
+        yellow = override.yellow_threshold if override.yellow_threshold is not None else rule.yellow_threshold
+        red = override.red_threshold if override.red_threshold is not None else rule.red_threshold
+        return replace(rule, yellow_threshold=yellow, red_threshold=red)
 
     def _evaluate_record(self, record: object, rule: FlagRule) -> Optional[FlagSeverity]:
         """
