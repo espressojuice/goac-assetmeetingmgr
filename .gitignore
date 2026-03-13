@@ -49,3 +49,9 @@ deploy/secrets/
 
 # Secrets reference
 Secrets.md
+
+# Reference PDFs with sensitive dealership data
+data/reference_ashdown_labeled.pdf
+
+# Test packet PDFs (large binaries, sensitive dealership data)
+testdata/

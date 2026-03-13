@@ -36,6 +36,8 @@ class ClassifiedPage(BaseModel):
     page_number: int
     document_type: str
     confidence: int  # match score from classifier
+    subtype: Optional[str] = None  # e.g., "F&I Chargeback — New Over 90", "GL 0504 New"
+    needs_user_input: bool = False  # True when GL 0504 New/Used can't be auto-determined
 
 
 class UnclassifiedPage(BaseModel):

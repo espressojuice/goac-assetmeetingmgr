@@ -146,6 +146,15 @@
 - [x] Integrate into upload endpoint (both single and bulk)
 - [x] Update UploadResponse/BulkUploadResponse schemas with PacketValidationResult
 - [x] Frontend upload flow shows found/missing docs
+- [x] **Classifier Rebuild (Session 21)**: Rewrote PageClassifier with reference signatures from Ashdown labeled PDF
+  - Built OCR reference corpus: 27 pages of tesseract output in data/reference_ocr/
+  - Document signatures spec: data/reference_signatures.md (16 doc types + classification priority order)
+  - Schedule-number-first matching (OCR-tolerant: handles "5chedule#:", "hedule#:", garbled prefixes)
+  - GL 0504 account-based subtyping (15A=New, 15B=Used, 850/850A/851/851A for chargebacks)
+  - Continuation page detection (Schedule Summary with no schedule number inherits previous page's doc_id)
+  - OCR artifact tolerance: "Dpen ROs", "ACCCUNT", "MISSING TtTLE", truncated headers
+  - 27/27 reference pages classify correctly
+  - Added subtype and needs_user_input fields to ClassifiedPage schema
 
 ## Task 5: Tests + Commit
 - [x] Run all tests — 459 passing, 0 failures
@@ -350,6 +359,18 @@
 - Upload page redirects immediately after file saved (no waiting for validation)
 - Updated all upload tests for new async response format
 - 461 tests passing (0 regressions)
+
+### Session 21 — 2026-03-13 (Classifier Rebuild with Reference Signatures)
+- Rebuilt PageClassifier in packet_validator.py using OCR reference signatures from Ashdown labeled PDF
+- Built reference corpus: 27 pages of tesseract OCR output (data/reference_ocr/) + document signatures spec (data/reference_signatures.md)
+- New classification approach: schedule-number-first for Schedule Summaries, account-number-first for GL 0504
+- OCR tolerance for common artifacts: garbled "Schedule" ("5chedule", "hedule"), "ACCOUNT" ("ACCCUNT", "A00010;T"), "Open ROs" ("Dpen ROs"), "MISSING TITLE" ("MISSING TtTLE")
+- GL 0504 subtyping: 15A=New, 15B=Used, 850/850A=F&I Chargeback New, 851/851A=F&I Chargeback Used
+- Continuation page detection: Schedule Summary with no schedule number inherits previous page's doc_id
+- Intro/cover page detection skips "ASSET MEETING" pages
+- Employee list checked last (least distinctive — name roster pattern with role keywords)
+- 27/27 reference pages classify correctly
+- 451 tests passing (pre-existing scheduler timing test excluded)
 
 ### Session 20 — 2026-03-13 (Production Fixes: Validation + Auth Loop)
 - Diagnosed stuck packet validation (page 0/31 forever) on production server
