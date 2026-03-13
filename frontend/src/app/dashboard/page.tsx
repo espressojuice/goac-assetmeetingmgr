@@ -16,6 +16,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const token = (session as any)?.backendToken;
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     fetchDashboard(token)
       .then(setData)
       .catch((err) => setError(err.message))

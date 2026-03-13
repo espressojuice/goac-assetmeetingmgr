@@ -17,7 +17,10 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
   const res = await fetch(`${API_BASE}/api/v1${path}`, { headers, ...rest });
   if (res.status === 401) {
     if (typeof window !== "undefined") {
-      window.location.href = "/";
+      // Sign out via NextAuth to clear session, then redirect to home.
+      // Using dynamic import to avoid circular deps and SSR issues.
+      const { signOut } = await import("next-auth/react");
+      await signOut({ callbackUrl: "/" });
     }
     throw new Error("Unauthorized");
   }
