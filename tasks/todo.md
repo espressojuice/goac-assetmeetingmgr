@@ -351,14 +351,18 @@
 - Updated all upload tests for new async response format
 - 461 tests passing (0 regressions)
 
-### Session 20 — 2026-03-12 (Production Validation Fix)
+### Session 20 — 2026-03-13 (Production Fixes: Validation + Auth Loop)
 - Diagnosed stuck packet validation (page 0/31 forever) on production server
 - Root cause: `_extract_text()` processed ALL 31 pages upfront (including tesseract OCR on 30 scanned pages) before the per-page classification loop — progress stayed at 0 for ~100 seconds
 - Fixed `validate_detailed_with_progress()` to extract and classify one page at a time — progress now updates after each page including during OCR
 - Fixed `--workers 2` → `--workers 1` — in-memory progress store is per-process, so multi-worker broke progress polling (requests could hit wrong worker)
 - Removed easyocr from requirements.txt and torch from Dockerfile (switched to tesseract previously) — API memory dropped 262MB → 80MB
 - Added Alembic migration 005 for `flags.previous_flag_id` and `flags.escalation_level` columns — fixed `UndefinedColumnError` crashing the notification scheduler every run
-- Deployed, rebuilt, migrated, verified — all working
+- Fixed auth redirect loop: dashboard → 401 → hard redirect to `/` → NextAuth sees "authenticated" → redirect to `/dashboard` → repeat forever
+  - api.ts: replaced `window.location.href = "/"` with `signOut()` from NextAuth on 401 — clears session before redirect
+  - dashboard: skip API fetch when `backendToken` is missing (prevents 401 while session loading)
+  - Rebuilt and redeployed frontend container
+- Deployed all fixes, verified both API and frontend running clean
 
 ### Session 17 — 2026-03-11 (Phase 3 Infrastructure)
 - Scanned all 17 test packet PDFs with tesseract OCR for required document detection
