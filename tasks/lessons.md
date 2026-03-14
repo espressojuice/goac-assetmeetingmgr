@@ -93,3 +93,8 @@
 - **2026-03-14 (Session 23)**: Condensed packet endpoint is JSON (not PDF) since the execute report already serves as the condensed PDF output.
 - **2026-03-14 (Session 23)**: Resolution trends sorted ascending by date for frontend chart plotting (oldest → newest left to right).
 - **2026-03-14 (Session 23)**: Per-store overrides (Phase 4A) combined with per-manager accountability metrics (Phase 4B) fully address Joel/Amanda/Thomas's email feedback about benchmarks varying by make, store, and market.
+- **2026-03-14 (Session 23)**: Recurring meeting templates are enriched schedules, not a separate model — avoids model proliferation. Template fields (template_name, default_attendee_ids, auto_create_meetings, reminder_days_before) live on MeetingSchedule.
+- **2026-03-14 (Session 23)**: auto_create_upcoming_meetings is idempotent — checks for existing meetings (same store_id + meeting_date) before creating duplicates. Safe to call daily from a scheduled job.
+- **2026-03-14 (Session 23)**: Google Calendar stub uses the interface/adapter pattern — all methods return None/False when disabled, easy to swap in real implementation later. Nullable google_calendar_event_id on Meeting model ready for linking.
+- **2026-03-14 (Session 23)**: JSON column type works well for storing lists of UUIDs (default_attendee_ids) when a join table would be overkill — no need to query/filter by attendee, just store and retrieve the list.
+- **2026-03-14 (Session 23)**: Phase 4C designing for future integration without building it: stub service + nullable event_id column on Meeting. Zero external dependencies added (no google-api-python-client).

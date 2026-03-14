@@ -19,8 +19,8 @@ Per-store configurable flagging thresholds, pre-meeting question workflow with f
 ### Phase 4B: Dashboard & Reporting *(COMPLETE)*
 Per-manager resolution rates and accountability metrics, store comparison views, execute report PDF with top-10 priority list, CSV exports (meetings, flags, attendance, promise tracking), resolution trends over time, promise date tracking, condensed packet view. Driven by Joel Robinson (Market President), Amanda Ainsworth (CFO), and Thomas Orr's feedback that benchmarks vary per make, store, and market.
 
-### Phase 4C: Scheduling & Calendar *(PLANNED)*
-Meeting scheduling with 2x/month cadence enforcement, Google Calendar integration, recurring meeting templates.
+### Phase 4C: Scheduling & Calendar *(COMPLETE)*
+Meeting scheduling with 5-cadence enforcement (weekly, biweekly, first & third, second & fourth, custom), recurring meeting templates with auto-creation, Google Calendar integration (stubbed — ready for credentials).
 
 ## Tech Stack
 
@@ -33,7 +33,7 @@ Meeting scheduling with 2x/month cadence enforcement, Google Calendar integratio
 
 ## Data Models
 
-22 models across 10 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
+23 models across 11 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
 
 ### Core
 | Model | Table | Description |
@@ -96,7 +96,13 @@ Meeting scheduling with 2x/month cadence enforcement, Google Calendar integratio
 |-------|-------|-------------|
 | StoreFlagOverride | `store_flag_overrides` | Per-store flagging threshold overrides |
 
+### Meeting Scheduling (`meeting_schedule.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| MeetingSchedule | `meeting_schedules` | Per-store meeting cadence, template settings, auto-create config |
+
 ### Enums
+- `MeetingCadence`: weekly, biweekly, first_and_third, second_and_fourth, custom
 - `MeetingStatus`: pending, processing, completed, error, in_progress, closed, cancelled
 - `ReconciliationType`: new_237, used_240
 - `PartsCategory`: parts_242, tires_243, gas_oil_grease_244
@@ -323,6 +329,15 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 | GET | `/api/v1/exports/attendance` | Export attendance records as CSV |
 | GET | `/api/v1/exports/promise-tracking` | Export promise tracking with days-late as CSV |
 
+### Scheduling (Corporate + GM)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/stores/{store_id}/schedule` | Get store's meeting schedule with template info |
+| PUT | `/api/v1/stores/{store_id}/schedule` | Set/update schedule with cadence, template, auto-create settings |
+| GET | `/api/v1/schedules/compliance` | Cadence compliance across all stores (corporate only) |
+| GET | `/api/v1/schedules/overdue` | Stores behind on meeting cadence (corporate only) |
+| POST | `/api/v1/schedules/auto-create` | Auto-create meetings for next 30 days from templates (corporate only) |
+
 ### Notifications (Authenticated, own only)
 | Method | Path | Description |
 |--------|------|-------------|
@@ -500,7 +515,11 @@ cd backend && python3 -m pytest tests/ -v
 - **Execute report PDF** — 4-section PDF (exec summary, top-10 priorities, flags by status, manager accountability). Reuses MetricsService scoring. Email delivery via SendGrid with PDF attachment.
 - **CSV exports** — 4 export endpoints (meetings, flags, attendance, promise tracking). UTF-8 BOM for Excel, Central Time timestamps, StreamingResponse download. Promise tracking sorted worst-offenders-first by days late.
 - **Resolution trends** — Per-meeting resolution/promise/attendance trends for charting. Promise tracking summary with avg days late and top-5 worst offenders. Condensed packet JSON view (flagged sections only + key metrics + attendance).
-- 608 tests passing (542 unit/API + 66 integration; 2 pre-existing scheduler timing flakes excluded).
+- 621 tests passing (555 unit/API + 66 integration; 2 pre-existing scheduler timing flakes excluded).
+
+**Phase 4C complete (Session 23).** Scheduling & calendar:
+- **Meeting scheduling** — MeetingSchedule model with 5 cadence types. Pure date-math upcoming generation, compliance checking, overdue detection with grace period. Dashboard cadence metrics. Migration 010.
+- **Recurring templates + calendar stub** — Template fields on MeetingSchedule (template_name, default_attendee_ids, auto_create_meetings, reminder_days_before). Idempotent auto-creation for daily job. CalendarService stub (no-op when disabled). google_calendar_event_id on Meeting for future linking. Migration 011.
 
 ## Reynolds Store Number Map
 

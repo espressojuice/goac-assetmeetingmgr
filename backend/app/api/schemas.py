@@ -650,3 +650,59 @@ class CondensedPacketResponse(BaseModel):
     summary: CondensedSummaryResponse
     sections: list[CondensedSectionResponse]
     attendance: CondensedAttendanceResponse
+
+
+# --- Meeting Scheduling ---
+
+class MeetingScheduleRequest(BaseModel):
+    cadence: str = Field(..., pattern="^(weekly|biweekly|first_and_third|second_and_fourth|custom)$")
+    preferred_day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    preferred_time: Optional[str] = None  # HH:MM format
+    minimum_per_month: int = Field(2, ge=1, le=8)
+    notes: Optional[str] = None
+    template_name: Optional[str] = None
+    default_attendee_ids: Optional[List[uuid.UUID]] = None
+    auto_create_meetings: bool = False
+    reminder_days_before: int = 2
+
+
+class MeetingScheduleResponse(BaseModel):
+    id: str
+    store_id: str
+    store_name: str
+    cadence: str
+    preferred_day_of_week: Optional[int] = None
+    preferred_time: Optional[str] = None  # HH:MM format
+    minimum_per_month: int
+    is_active: bool
+    notes: Optional[str] = None
+    upcoming_dates: list[datetime.date] = []
+    template_name: Optional[str] = None
+    default_attendee_ids: list[str] = []
+    default_attendee_names: list[str] = []
+    auto_create_meetings: bool = False
+    reminder_days_before: int = 2
+
+
+class AutoCreateResponse(BaseModel):
+    created: int
+    meetings: list[dict]
+
+
+class CadenceComplianceResponse(BaseModel):
+    store_id: str
+    store_name: str
+    cadence: str
+    minimum_required: int
+    actual_count: int
+    is_compliant: bool
+    next_expected_date: Optional[datetime.date] = None
+    days_since_last_meeting: Optional[int] = None
+
+
+class OverdueMeetingResponse(BaseModel):
+    store_id: str
+    store_name: str
+    last_meeting_date: Optional[datetime.date] = None
+    days_overdue: int
+    cadence: str

@@ -600,15 +600,70 @@
 - [x] Update README.md with Phase 4B features, new endpoints, test count
 - [x] Verify tasks/todo.md is current (all Phase 4B tasks complete)
 - [x] Run full test suite — 608 passed (542 unit/API + 66 integration), 2 known scheduler flakes
-- [ ] Git commit all changes
+- [x] Git commit all changes (d34f4e2)
 
 ### Session 23 — 2026-03-14 (Phase 4B Task 5)
 - Updated lessons.md with 11 Session 23 lessons (metrics aggregation, priority scoring, execute report, SendGrid attachments, CSV BOM, StreamingResponse, promise tracking, condensed packet, resolution trends, stakeholder feedback)
 - Updated README.md: Phase 4B marked COMPLETE, 14 new API endpoints documented, test count updated, status section updated
 - Updated todo.md: Task 5 added and tracked
 
-# Phase 4C — Scheduling & Calendar (upcoming)
+# Phase 4C — Scheduling & Calendar
 
-- [ ] Meeting scheduling (minimum 2x/month cadence enforcement)
-- [ ] Calendar integration (Google Calendar)
-- [ ] Recurring meeting templates
+## Task 1: Meeting Scheduling + Cadence Enforcement (R8)
+- [x] Create MeetingSchedule model with MeetingCadence enum (backend/app/models/meeting_schedule.py)
+- [x] Register model in backend/app/models/__init__.py
+- [x] Create Alembic migration 010_meeting_schedules.py (table + enum type + unique constraint)
+- [x] Create scheduling_service.py with 5 functions:
+  - [x] get_store_schedule() — returns schedule or None
+  - [x] upsert_store_schedule() — create or update
+  - [x] get_upcoming_meetings() — pure date math, generates expected dates by cadence
+  - [x] get_cadence_compliance() — compares actual vs minimum per month
+  - [x] check_overdue_meetings() — finds stores past grace period (interval + 3 days)
+- [x] Add 4 scheduling schemas (MeetingScheduleRequest/Response, CadenceComplianceResponse, OverdueMeetingResponse)
+- [x] Create schedules.py API routes with 4 endpoints:
+  - [x] GET /stores/{store_id}/schedule — corporate + GM (store-scoped)
+  - [x] PUT /stores/{store_id}/schedule — corporate + GM (store-scoped)
+  - [x] GET /schedules/compliance — corporate only
+  - [x] GET /schedules/overdue — corporate only
+- [x] Register schedules router in main.py
+- [x] Add cadence metrics to GET /dashboard (stores_overdue_meetings, cadence_compliance_rate)
+- [x] Write 13 service tests (test_scheduling_service.py)
+- [x] Write 12 API tests (test_schedules.py) — including RBAC (GM store-scoped, manager blocked)
+- [x] 559 non-integration tests passing (25 new, 0 regressions)
+
+### Session 23 — 2026-03-14 (Phase 4C Task 1)
+- Built MeetingSchedule model: one schedule per store (unique on store_id), 5 cadence types
+- Cadence options: WEEKLY, BIWEEKLY, FIRST_AND_THIRD, SECOND_AND_FOURTH, CUSTOM
+- get_upcoming_meetings() is pure date math — no external calendar library, generates dates from weekday occurrences
+- Compliance checks: actual meetings in month vs minimum_per_month (excludes ERROR status meetings)
+- Overdue detection: days_since_last_meeting > (30 / minimum_per_month) + 3 days grace
+- Dashboard enhanced with stores_overdue_meetings count and cadence_compliance_rate percentage
+- GM can GET/PUT schedule for their own stores only; manager blocked (403)
+- 25 new tests (13 service + 12 API), 0 regressions
+
+## Task 2: Recurring Meeting Templates + Google Calendar Stub
+- [x] Add template fields to MeetingSchedule model (template_name, default_attendee_ids, auto_create_meetings, reminder_days_before)
+- [x] Add google_calendar_event_id to Meeting model (nullable, for future calendar linking)
+- [x] Create Alembic migration 011_meeting_schedule_templates.py (4 new columns on meeting_schedules + 1 on meetings)
+- [x] Add auto_create_upcoming_meetings() to scheduling_service (idempotent, next 30 days)
+- [x] Add get_template_details() to scheduling_service (resolves attendee UUIDs to names)
+- [x] Update upsert_store_schedule() with template fields
+- [x] Update PUT/GET schedule endpoints to accept/return template fields
+- [x] Add POST /schedules/auto-create endpoint (corporate only)
+- [x] Update MeetingScheduleRequest/Response schemas with template fields
+- [x] Add AutoCreateResponse schema
+- [x] Create CalendarService stub (backend/app/services/calendar_service.py) — all methods no-op when disabled
+- [x] Write 5 new service tests (auto_create_upcoming_meetings: 3, get_template_details: 2)
+- [x] Write 1 template field save test (upsert)
+- [x] Write 4 new API tests (template PUT, template GET, auto-create, auto-create RBAC)
+- [x] Write 2 calendar service tests (enabled=False, create_event returns None)
+- [x] Update tasks/lessons.md with Session 23 final lessons
+- [x] Update README.md with Phase 4C status, new endpoints, model, test count
+- [x] All tests passing (0 regressions)
+
+### Session 23 — 2026-03-14 (Phase 4C Task 2)
+- Templates are enriched schedules — template_name, default_attendee_ids (JSON), auto_create_meetings, reminder_days_before on MeetingSchedule
+- auto_create_upcoming_meetings is idempotent: checks store_id + meeting_date before creating
+- CalendarService stub: interface/adapter pattern, all methods return None/False/0 when disabled
+- google_calendar_event_id on Meeting ready for future event linking (no Google API dependency)
+- 12 new tests (6 service + 4 API + 2 calendar), 0 regressions

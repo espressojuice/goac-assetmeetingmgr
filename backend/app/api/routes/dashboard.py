@@ -21,7 +21,7 @@ from app.api.schemas import (
     ManagerMetricsResponse, StoreComparisonResponse, PriorityItemResponse,
     MeetingTrendResponse, PromiseSummaryResponse, PromiseOffenderResponse,
 )
-from app.services import metrics_service
+from app.services import metrics_service, scheduling_service
 
 router = APIRouter()
 
@@ -46,6 +46,8 @@ class DashboardTotals(BaseModel):
     meetings_this_week: int
     top_priority_count: int = 0
     worst_resolution_rate: Optional[float] = None
+    stores_overdue_meetings: int = 0
+    cadence_compliance_rate: float = 0.0
 
 
 class DashboardResponse(BaseModel):
@@ -154,6 +156,19 @@ async def get_dashboard(
     except Exception:
         pass  # Don't break the dashboard if metrics fail
 
+    # Cadence compliance metrics
+    stores_overdue_meetings = 0
+    cadence_compliance_rate = 0.0
+    try:
+        overdue = await scheduling_service.check_overdue_meetings(db)
+        stores_overdue_meetings = len(overdue)
+        compliance = await scheduling_service.get_cadence_compliance(db)
+        if compliance:
+            compliant = sum(1 for c in compliance if c["is_compliant"])
+            cadence_compliance_rate = round(compliant / len(compliance) * 100, 1)
+    except Exception:
+        pass  # Don't break the dashboard if scheduling fails
+
     return DashboardResponse(
         stores=store_items,
         totals=DashboardTotals(
@@ -164,6 +179,8 @@ async def get_dashboard(
             meetings_this_week=0,
             top_priority_count=top_priority_count,
             worst_resolution_rate=worst_resolution_rate,
+            stores_overdue_meetings=stores_overdue_meetings,
+            cadence_compliance_rate=cadence_compliance_rate,
         ),
     )
 
