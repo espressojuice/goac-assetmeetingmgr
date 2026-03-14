@@ -521,3 +521,132 @@ class AttendanceSummaryResponse(BaseModel):
     total_expected: int
     total_present: int
     total_absent: int
+
+
+# --- Dashboard Metrics ---
+
+class ManagerMetricsResponse(BaseModel):
+    user_id: str
+    user_name: str
+    user_role: str
+    store_names: list[str]
+    total_assigned: int
+    total_resolved: int
+    total_unresolved: int
+    total_responded: int
+    total_open: int
+    total_overdue: int
+    resolution_rate: float  # 0.0 to 100.0
+    avg_response_time_hours: Optional[float] = None
+
+
+class StoreComparisonResponse(BaseModel):
+    store_id: str
+    store_name: str
+    total_meetings: int
+    total_flags: int
+    total_verified: int
+    total_unresolved: int
+    total_open: int
+    resolution_rate: float
+    avg_flags_per_meeting: float
+    attendance_rate: float
+    meetings_on_schedule: bool
+
+
+class PriorityItemResponse(BaseModel):
+    flag_id: str
+    priority_score: int
+    store_name: str
+    rule_name: str
+    description: str
+    severity: str
+    status: str
+    assigned_to_name: Optional[str] = None
+    days_outstanding: int
+    expected_resolution_date: Optional[str] = None
+    escalation_level: int
+    meeting_date: str
+
+
+# --- Execute Report ---
+
+class ExecuteReportSendRequest(BaseModel):
+    recipient_ids: Optional[List[uuid.UUID]] = None
+
+
+class ExecuteReportSendResponse(BaseModel):
+    sent_to: int
+    message: str
+
+
+# --- Resolution Trends ---
+
+class MeetingTrendResponse(BaseModel):
+    meeting_id: str
+    meeting_date: str
+    store_name: str
+    total_flags: int
+    verified: int
+    unresolved: int
+    responded: int
+    open: int
+    resolution_rate: float
+    promises_kept: int
+    promises_broken: int
+    attendance_rate: float
+
+
+class PromiseOffenderResponse(BaseModel):
+    user_name: str
+    broken_count: int
+    total_promises: int
+
+
+class PromiseSummaryResponse(BaseModel):
+    total_promises: int
+    promises_kept: int
+    promises_broken: int
+    promises_pending: int
+    avg_days_late: Optional[float] = None
+    worst_offenders: list[PromiseOffenderResponse]
+
+
+# --- Condensed Packet ---
+
+class CondensedFlagItem(BaseModel):
+    id: str
+    severity: str
+    status: str
+    field_name: str
+    field_value: Optional[str] = None
+    message: str
+    assigned_to: Optional[str] = None
+    response_text: Optional[str] = None
+
+class CondensedSectionResponse(BaseModel):
+    category: str
+    title: str
+    flag_count: int
+    flags: list[CondensedFlagItem]
+    key_metrics: dict
+
+class CondensedAttendanceResponse(BaseModel):
+    present: int
+    expected: int
+    absent: list[str]
+
+class CondensedSummaryResponse(BaseModel):
+    total_flags: int
+    red: int
+    yellow: int
+    verified: int
+    unresolved: int
+    open: int
+
+class CondensedPacketResponse(BaseModel):
+    meeting_date: str
+    store_name: str
+    summary: CondensedSummaryResponse
+    sections: list[CondensedSectionResponse]
+    attendance: CondensedAttendanceResponse

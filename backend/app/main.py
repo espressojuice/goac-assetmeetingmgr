@@ -14,6 +14,7 @@ from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.notifications import router as notifications_router
 from app.api.routes.flag_rules import router as flag_rules_router
 from app.api.routes.attendance import router as attendance_router
+from app.api.routes.exports import router as exports_router
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -36,6 +37,7 @@ app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(notifications_router, prefix="/api/v1", tags=["notifications"])
 app.include_router(flag_rules_router, prefix="/api/v1", tags=["flag-rules"])
 app.include_router(attendance_router, prefix="/api/v1", tags=["attendance"])
+app.include_router(exports_router, prefix="/api/v1", tags=["exports"])
 
 
 @app.on_event("startup")

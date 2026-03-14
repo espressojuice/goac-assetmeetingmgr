@@ -2,5 +2,6 @@
 
 from app.generators.packet_generator import StandardizedPacketGenerator
 from app.generators.flagged_items_report import FlaggedItemsReportGenerator
+from app.generators.execute_report import ExecuteReportGenerator
 
-__all__ = ["StandardizedPacketGenerator", "FlaggedItemsReportGenerator"]
+__all__ = ["StandardizedPacketGenerator", "FlaggedItemsReportGenerator", "ExecuteReportGenerator"]

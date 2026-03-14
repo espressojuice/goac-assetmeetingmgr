@@ -15,6 +15,8 @@ from app.api.schemas import (
     MeetingFlagDetailResponse,
     MeetingCloseRequest,
     MeetingCloseResponse,
+    ExecuteReportSendRequest,
+    ExecuteReportSendResponse,
 )
 from app.auth import get_current_user, require_corporate_or_gm, verify_store_access, get_user_store_ids
 from app.database import get_db
@@ -24,6 +26,7 @@ from app.models.inventory import NewVehicleInventory, UsedVehicleInventory, Serv
 from app.models.parts import PartsInventory, PartsAnalysis
 from app.models.financial import Receivable, FIChargeback, ContractInTransit, Prepaid, PolicyAdjustment
 from app.models.operations import OpenRepairOrder, WarrantyClaim, MissingTitle, SlowToAccounting
+from app.models.store import Store
 from app.models.user import User, UserRole, UserStore
 from app.models.accountability import MeetingAttendance
 from app.services.meeting_service import get_meeting_detail, get_meeting_flags
@@ -461,3 +464,60 @@ async def _send_meeting_recap(
     email_service = EmailService()
     for user in corporate_users:
         await email_service.send_email(user.email, subject, html)
+
+
+# ── Execute Report Endpoints ────────────────────────────────────────────
+
+
+@router.get("/meetings/{meeting_id}/execute-report")
+async def download_execute_report(
+    meeting_id: str,
+    top_n: int = 10,
+    current_user: User = Depends(require_corporate_or_gm),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the Execute Report PDF for a meeting.
+
+    Corporate and GM roles only.
+    """
+    from fastapi.responses import Response
+    from app.services.execute_report_service import generate_execute_report
+
+    meeting = await _get_meeting_with_access_check(meeting_id, current_user, db)
+
+    pdf_bytes = await generate_execute_report(meeting.id, db, top_n=top_n)
+
+    # Fetch store for filename
+    store_result = await db.execute(select(Store).where(Store.id == meeting.store_id))
+    store = store_result.scalar_one()
+    filename = f"Execute_Report_{store.code}_{meeting.meeting_date}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/meetings/{meeting_id}/execute-report/send", response_model=ExecuteReportSendResponse)
+async def send_execute_report_endpoint(
+    meeting_id: str,
+    body: ExecuteReportSendRequest,
+    current_user: User = Depends(require_corporate_or_gm),
+    db: AsyncSession = Depends(get_db),
+) -> ExecuteReportSendResponse:
+    """Email the Execute Report to specified recipients or all corporate users.
+
+    Corporate and GM roles only.
+    """
+    from app.services.execute_report_service import send_execute_report
+
+    meeting = await _get_meeting_with_access_check(meeting_id, current_user, db)
+
+    recipient_ids = [uid for uid in body.recipient_ids] if body.recipient_ids else None
+    sent_count = await send_execute_report(meeting.id, db, recipient_ids=recipient_ids)
+
+    return ExecuteReportSendResponse(
+        sent_to=sent_count,
+        message=f"Execute report sent to {sent_count} recipient{'s' if sent_count != 1 else ''}",
+    )

@@ -13,6 +13,11 @@ from app.api.schemas import (
     StoreResponse,
     FlagResponse,
     FlagStatsResponse,
+    CondensedPacketResponse,
+    CondensedSummaryResponse,
+    CondensedSectionResponse,
+    CondensedFlagItem,
+    CondensedAttendanceResponse,
 )
 from app.auth import get_current_user
 from app.database import get_db
@@ -24,6 +29,8 @@ from app.models.inventory import NewVehicleInventory, UsedVehicleInventory, Serv
 from app.models.parts import PartsInventory, PartsAnalysis
 from app.models.financial import Receivable, FIChargeback, ContractInTransit, Prepaid, PolicyAdjustment
 from app.models.operations import OpenRepairOrder, WarrantyClaim, MissingTitle, SlowToAccounting
+from app.models.accountability import FlagAssignment, MeetingAttendance
+from app.auth import require_corporate_or_gm, get_user_store_ids
 
 router = APIRouter()
 
@@ -195,5 +202,187 @@ async def get_meeting_summary(
             open=open_count,
             responded=responded_count,
             by_category=by_category,
+        ),
+    )
+
+
+# Category titles and key metric builders
+_CATEGORY_TITLES = {
+    FlagCategory.INVENTORY: "Vehicle Inventory",
+    FlagCategory.PARTS: "Parts & Service",
+    FlagCategory.FINANCIAL: "Financial",
+    FlagCategory.OPERATIONS: "Operations",
+}
+
+
+async def _build_key_metrics(category: FlagCategory, meeting_id, db: AsyncSession) -> dict:
+    """Build key summary metrics for a category based on parsed data."""
+    mid = meeting_id
+    metrics = {}
+
+    if category == FlagCategory.INVENTORY:
+        new_count = (await db.execute(
+            select(func.count()).select_from(NewVehicleInventory).where(NewVehicleInventory.meeting_id == mid)
+        )).scalar() or 0
+        used_count = (await db.execute(
+            select(func.count()).select_from(UsedVehicleInventory).where(UsedVehicleInventory.meeting_id == mid)
+        )).scalar() or 0
+        used_over_60 = (await db.execute(
+            select(func.count()).select_from(UsedVehicleInventory).where(
+                UsedVehicleInventory.meeting_id == mid,
+                UsedVehicleInventory.days_in_stock > 60,
+            )
+        )).scalar() or 0
+        loaner_count = (await db.execute(
+            select(func.count()).select_from(ServiceLoaner).where(ServiceLoaner.meeting_id == mid)
+        )).scalar() or 0
+        metrics = {
+            "new_vehicle_count": new_count,
+            "used_vehicle_count": used_count,
+            "used_over_60_days": used_over_60,
+            "service_loaner_count": loaner_count,
+        }
+
+    elif category == FlagCategory.PARTS:
+        parts_count = (await db.execute(
+            select(func.count()).select_from(PartsAnalysis).where(PartsAnalysis.meeting_id == mid)
+        )).scalar() or 0
+        metrics = {"parts_analysis_records": parts_count}
+
+    elif category == FlagCategory.FINANCIAL:
+        recv_count = (await db.execute(
+            select(func.count()).select_from(Receivable).where(Receivable.meeting_id == mid)
+        )).scalar() or 0
+        cit_count = (await db.execute(
+            select(func.count()).select_from(ContractInTransit).where(ContractInTransit.meeting_id == mid)
+        )).scalar() or 0
+        chargeback_count = (await db.execute(
+            select(func.count()).select_from(FIChargeback).where(FIChargeback.meeting_id == mid)
+        )).scalar() or 0
+        metrics = {
+            "receivables_count": recv_count,
+            "contracts_in_transit_count": cit_count,
+            "chargebacks_count": chargeback_count,
+        }
+
+    elif category == FlagCategory.OPERATIONS:
+        ro_count = (await db.execute(
+            select(func.count()).select_from(OpenRepairOrder).where(OpenRepairOrder.meeting_id == mid)
+        )).scalar() or 0
+        warranty_count = (await db.execute(
+            select(func.count()).select_from(WarrantyClaim).where(WarrantyClaim.meeting_id == mid)
+        )).scalar() or 0
+        missing_title_count = (await db.execute(
+            select(func.count()).select_from(MissingTitle).where(MissingTitle.meeting_id == mid)
+        )).scalar() or 0
+        metrics = {
+            "open_ro_count": ro_count,
+            "warranty_claims_count": warranty_count,
+            "missing_titles_count": missing_title_count,
+        }
+
+    return metrics
+
+
+@router.get("/packets/{meeting_id}/condensed", response_model=CondensedPacketResponse)
+async def get_condensed_packet(
+    meeting_id: str,
+    current_user: User = Depends(require_corporate_or_gm),
+    db: AsyncSession = Depends(get_db),
+) -> CondensedPacketResponse:
+    """Condensed packet JSON — only flagged/important items, not 30 pages of raw data."""
+    meeting = await _get_meeting_with_access(meeting_id, current_user, db)
+
+    # Get store
+    store_result = await db.execute(select(Store).where(Store.id == meeting.store_id))
+    store = store_result.scalar_one()
+
+    # Get all flags for this meeting
+    flags_result = await db.execute(
+        select(Flag).where(Flag.meeting_id == meeting.id).order_by(Flag.category, Flag.severity.desc())
+    )
+    flags = list(flags_result.scalars().all())
+
+    # Summary counts
+    total_flags = len(flags)
+    red = sum(1 for f in flags if f.severity == FlagSeverity.RED)
+    yellow = sum(1 for f in flags if f.severity == FlagSeverity.YELLOW)
+    verified = sum(1 for f in flags if f.status == FlagStatus.VERIFIED)
+    unresolved = sum(1 for f in flags if f.status == FlagStatus.UNRESOLVED)
+    open_count = sum(1 for f in flags if f.status == FlagStatus.OPEN)
+
+    # Group flags by category — only include sections with flags
+    sections = []
+    for category in FlagCategory:
+        cat_flags = [f for f in flags if f.category == category]
+        if not cat_flags:
+            continue
+
+        # Get assigned_to names for each flag
+        flag_items = []
+        for f in cat_flags:
+            # Get latest assignment
+            assign_result = await db.execute(
+                select(FlagAssignment)
+                .where(FlagAssignment.flag_id == f.id)
+                .order_by(FlagAssignment.created_at.desc())
+                .limit(1)
+            )
+            assignment = assign_result.scalar_one_or_none()
+            assigned_to_name = None
+            if assignment:
+                user_result = await db.execute(
+                    select(User.name).where(User.id == assignment.assigned_to_id)
+                )
+                assigned_to_name = user_result.scalar_one_or_none()
+
+            flag_items.append(CondensedFlagItem(
+                id=str(f.id),
+                severity=f.severity.value,
+                status=f.status.value,
+                field_name=f.field_name,
+                field_value=f.field_value,
+                message=f.message,
+                assigned_to=assigned_to_name,
+                response_text=f.response_text,
+            ))
+
+        key_metrics = await _build_key_metrics(category, meeting.id, db)
+
+        sections.append(CondensedSectionResponse(
+            category=category.value,
+            title=_CATEGORY_TITLES.get(category, category.value),
+            flag_count=len(cat_flags),
+            flags=flag_items,
+            key_metrics=key_metrics,
+        ))
+
+    # Attendance summary
+    att_result = await db.execute(
+        select(MeetingAttendance, User)
+        .join(User, MeetingAttendance.user_id == User.id)
+        .where(MeetingAttendance.meeting_id == meeting.id)
+    )
+    att_rows = att_result.all()
+    present = sum(1 for a, u in att_rows if a.checked_in)
+    expected = len(att_rows)
+    absent_names = [u.name for a, u in att_rows if not a.checked_in]
+
+    return CondensedPacketResponse(
+        meeting_date=str(meeting.meeting_date),
+        store_name=store.name,
+        summary=CondensedSummaryResponse(
+            total_flags=total_flags,
+            red=red,
+            yellow=yellow,
+            verified=verified,
+            unresolved=unresolved,
+            open=open_count,
+        ),
+        sections=sections,
+        attendance=CondensedAttendanceResponse(
+            present=present,
+            expected=expected,
+            absent=absent_names,
         ),
     )

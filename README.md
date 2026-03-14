@@ -16,8 +16,8 @@ S3 packet storage (Hetzner Object Storage), packet completeness validation (16-d
 ### Phase 4A: Core Meeting Workflow *(COMPLETE)*
 Per-store configurable flagging thresholds, pre-meeting question workflow with flag verification (VERIFIED/UNRESOLVED statuses), attendance tracking (check-in/check-out), post-meeting close-out with email recap to corporate.
 
-### Phase 4B: Dashboard & Reporting *(PLANNED)*
-Per-manager resolution rates, accountability metrics, store comparison views, export meeting history.
+### Phase 4B: Dashboard & Reporting *(COMPLETE)*
+Per-manager resolution rates and accountability metrics, store comparison views, execute report PDF with top-10 priority list, CSV exports (meetings, flags, attendance, promise tracking), resolution trends over time, promise date tracking, condensed packet view. Driven by Joel Robinson (Market President), Amanda Ainsworth (CFO), and Thomas Orr's feedback that benchmarks vary per make, store, and market.
 
 ### Phase 4C: Scheduling & Calendar *(PLANNED)*
 Meeting scheduling with 2x/month cadence enforcement, Google Calendar integration, recurring meeting templates.
@@ -247,6 +247,7 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 | GET | `/api/v1/packets/{meeting_id}` | Download the generated packet PDF |
 | GET | `/api/v1/packets/{meeting_id}/flagged-items` | Download the flagged items report PDF |
 | GET | `/api/v1/packets/{meeting_id}/summary` | Get JSON summary of meeting data and flags |
+| GET | `/api/v1/packets/{meeting_id}/condensed` | Condensed packet view — only flagged sections, key metrics, attendance (JSON) |
 
 ### Flags (Authenticated, store-scoped)
 | Method | Path | Description |
@@ -302,6 +303,25 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/dashboard` | Aggregated overview (filtered by role) |
+| GET | `/api/v1/dashboard/manager-metrics` | Per-manager resolution rates and flag stats (corporate only) |
+| GET | `/api/v1/dashboard/store-comparison` | Side-by-side store metrics (corporate only) |
+| GET | `/api/v1/dashboard/top-priorities` | Top N urgency-scored priority items (corporate + GM) |
+| GET | `/api/v1/dashboard/resolution-trends` | Per-meeting resolution/promise/attendance trends (corporate + GM) |
+| GET | `/api/v1/dashboard/promise-tracking` | Aggregate promise tracking with worst offenders (corporate only) |
+
+### Execute Report (Corporate + GM)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/meetings/{meeting_id}/execute-report` | Download execute report PDF (top priorities, flags by status, manager accountability) |
+| POST | `/api/v1/meetings/{meeting_id}/execute-report/send` | Email execute report PDF as attachment to recipients |
+
+### Exports (Corporate only)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/exports/meetings` | Export meeting history as CSV |
+| GET | `/api/v1/exports/flags` | Export flags with priority scoring as CSV |
+| GET | `/api/v1/exports/attendance` | Export attendance records as CSV |
+| GET | `/api/v1/exports/promise-tracking` | Export promise tracking with days-late as CSV |
 
 ### Notifications (Authenticated, own only)
 | Method | Path | Description |
@@ -474,7 +494,13 @@ cd backend && python3 -m pytest tests/ -v
 - **Pre-meeting question workflow** — Flag verification (VERIFIED/UNRESOLVED statuses), expected resolution dates, pre-meeting reminder notifications. GM/controller must explicitly verify responded flags during the meeting. Migration 007.
 - **Attendance tracking** — MeetingAttendance with check-in timestamps, 4 API endpoints (list, mark, unmark, summary). Expected attendees built from UserStore associations. Migration 008.
 - **Post-meeting close-out** — Meeting CLOSED status with close notes, auto-unresolves OPEN/ESCALATED flags, email recap to corporate (attendance + flags grouped by status). Migration 009.
-- 531 tests passing (70 new across Phase 4A, 0 regressions).
+
+**Phase 4B complete (Session 23).** Dashboard & reporting built across 4 tasks:
+- **Accountability metrics** — MetricsService with per-manager resolution rates (worst-first), store comparison (attendance/flags/cadence), additive priority scoring (UNRESOLVED+10, ESCALATED+8, RED+3, broken promise+5, etc.).
+- **Execute report PDF** — 4-section PDF (exec summary, top-10 priorities, flags by status, manager accountability). Reuses MetricsService scoring. Email delivery via SendGrid with PDF attachment.
+- **CSV exports** — 4 export endpoints (meetings, flags, attendance, promise tracking). UTF-8 BOM for Excel, Central Time timestamps, StreamingResponse download. Promise tracking sorted worst-offenders-first by days late.
+- **Resolution trends** — Per-meeting resolution/promise/attendance trends for charting. Promise tracking summary with avg days late and top-5 worst offenders. Condensed packet JSON view (flagged sections only + key metrics + attendance).
+- 608 tests passing (542 unit/API + 66 integration; 2 pre-existing scheduler timing flakes excluded).
 
 ## Reynolds Store Number Map
 

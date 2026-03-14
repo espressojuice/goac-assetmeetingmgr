@@ -488,20 +488,124 @@
 - [x] Write 4 service tests for recap email (test_meeting_recap.py)
 - [x] 531 tests passing (16 new, 0 regressions)
 
-## Task 5: Update All MD Files + Final Verification
+## Task 5: Update All MD Files + Final Verification (Session 22)
 - [x] Update tasks/todo.md with Phase 4A summary and Phase 4B/4C roadmap
 - [x] Update tasks/lessons.md with Session 22 lessons
 - [x] Update README.md with new features, endpoints, migrations, test count
 - [x] Run full test suite — final verification
 - [x] Git commit all MD files
 
-# Phase 4B — Dashboard & Reporting (upcoming)
+# Phase 4B — Dashboard & Reporting
 
-- [ ] Corporate dashboard: per-manager resolution rates
-- [ ] Accountability metrics: flags resolved vs unresolved over time
-- [ ] Store comparison views
-- [ ] Export meeting history
-- [ ] Condensed packet / flagged-only view
+## Task 1: Accountability Metrics Service + Corporate Dashboard Enhancements
+- [x] Create MetricsService (backend/app/services/metrics_service.py)
+  - [x] get_manager_resolution_rates() — per-manager flag resolution stats
+  - [x] get_store_comparison() — side-by-side store metrics
+  - [x] get_top_priority_items() — Joel's top N urgency-scored items
+- [x] Add dashboard metrics schemas (ManagerMetricsResponse, StoreComparisonResponse, PriorityItemResponse)
+- [x] Add GET /dashboard/manager-metrics endpoint (corporate only)
+- [x] Add GET /dashboard/store-comparison endpoint (corporate only)
+- [x] Add GET /dashboard/top-priorities endpoint (corporate + GM)
+- [x] Enhance existing GET /dashboard with top_priority_count and worst_resolution_rate
+- [x] Write 11 service tests (test_metrics_service.py)
+- [x] Write 9 API tests (test_dashboard_metrics.py)
+- [x] 551 tests passing (20 new, 0 regressions)
+
+### Session 23 — 2026-03-14 (Phase 4B Task 1)
+- Built MetricsService with 3 core methods for accountability metrics
+- Priority scoring is additive: UNRESOLVED(+10), ESCALATED(+8), past deadline(+5), within 48h(+3), RED(+3), YELLOW(+1), broken promise(+5), recurring(+2), previous unresolved(+2)
+- Manager metrics sorted worst-first (lowest resolution rate) — what Thomas wants
+- Store comparison includes attendance rate, meeting cadence check, flags per meeting
+- Top priorities accessible to GMs (store-scoped) and corporate (all stores)
+- Enhanced existing dashboard with top_priority_count and worst_resolution_rate
+- 20 new tests (11 service + 9 API), 0 regressions
+
+## Task 2: Execute Report PDF Generation (R5, R6 — Joel's "Top 10" Report)
+- [x] Create ExecuteReportGenerator (backend/app/generators/execute_report.py)
+  - [x] Page 1: Executive summary — meeting status, attendance, flag metrics (color-coded)
+  - [x] Page 2: Top priority items table — scored, color-coded (red >=10, yellow >=5)
+  - [x] Page 3+: Flags by status (unresolved, responded, verified, auto-unresolved)
+  - [x] Manager accountability table (worst-first, color-coded resolution rates)
+  - [x] GOAC branding (#003366), professional header/footer on every page
+- [x] Create execute report service (backend/app/services/execute_report_service.py)
+  - [x] generate_execute_report() — loads data, calls generator, returns PDF bytes
+  - [x] send_execute_report() — generates PDF, emails with attachment to recipients
+  - [x] Reuses MetricsService.get_top_priority_items() for priority scoring (no duplication)
+  - [x] Per-meeting manager accountability metrics (assigned/resolved/unresolved per manager)
+  - [x] Auto-unresolved detection (UNRESOLVED + never answered)
+- [x] Add send_email_with_attachment() to EmailService (SendGrid v3 attachments API)
+- [x] Add ExecuteReportSendRequest and ExecuteReportSendResponse schemas
+- [x] Add GET /meetings/{id}/execute-report endpoint (PDF download, corporate + GM)
+- [x] Add POST /meetings/{id}/execute-report/send endpoint (email with PDF attachment)
+- [x] Register ExecuteReportGenerator in generators __init__.py
+- [x] Write 12 generator tests (test_execute_report.py)
+- [x] Write 10 API tests (test_execute_report_api.py)
+- [x] 505 non-integration tests passing (22 new, 0 regressions)
+
+### Session 23 — 2026-03-14 (Phase 4B Task 2)
+- Built ExecuteReportGenerator: 4-section PDF (exec summary, top priorities, flags by status, manager accountability)
+- Reuses MetricsService.get_top_priority_items() for Joel's priority scoring — no duplication
+- Color-coded priority rows: red (score >= 10), yellow (score >= 5), white (< 5)
+- Flags grouped by status: UNRESOLVED (red header), RESPONDED (yellow), VERIFIED (green), AUTO-UNRESOLVED (dark red)
+- Manager accountability sorted worst-first with color-coded resolution rates (< 50% red, < 80% yellow)
+- Added send_email_with_attachment() to EmailService for PDF email delivery via SendGrid
+- Auto-unresolved flags identified by: UNRESOLVED status + no response_text + no responded_at
+- 22 new tests (12 generator + 10 API), 0 regressions
+
+## Task 3: Meeting History Export (CSV)
+- [x] Create export_service.py with 4 export functions (meetings, flags, attendance, promise tracking)
+- [x] Create exports.py API routes (4 GET endpoints, corporate only, StreamingResponse CSV)
+- [x] Register exports router in main.py
+- [x] Write 13 service tests (test_export_service.py)
+- [x] Write 6 API tests (test_exports.py) — including RBAC (403 for GM/manager)
+- [x] All 516 tests passing (19 new, 0 regressions)
+
+### Session 23 — 2026-03-14 (Phase 4B Task 3)
+- Built export_service.py: 4 async CSV export functions using Python csv + io.StringIO
+- UTF-8 BOM for Excel compatibility, timestamps in Central Time
+- Meetings CSV: flag summary stats (red/yellow/verified/unresolved/open/responded), resolution rate, attendance ratio, close info
+- Flags CSV: reuses MetricsService.get_top_priority_items() for priority scoring — no duplication
+- Attendance CSV: joined meeting/store/user, checked-in status + timestamp + checked-in-by
+- Promise tracking CSV: flags with expected_resolution_date, calculates days_late, Promise Kept (Yes/No/Pending)
+- Promise tracking sorted worst offenders first (days_late descending)
+- All 4 endpoints corporate-only with store_id/date_from/date_to filters
+- StreamingResponse with Content-Disposition attachment headers
+
+## Task 4: Resolution Tracking Over Time + Condensed Packet View
+- [x] Add MeetingTrendResponse, PromiseSummaryResponse, PromiseOffenderResponse schemas
+- [x] Add CondensedPacketResponse and related schemas (CondensedFlagItem, CondensedSectionResponse, etc.)
+- [x] Add get_resolution_trends() to metrics_service.py (per-meeting flag/promise/attendance stats)
+- [x] Add get_promise_tracking_summary() to metrics_service.py (aggregate promise tracking with worst offenders)
+- [x] Add GET /dashboard/resolution-trends endpoint (corporate + GM, store-scoped for GM)
+- [x] Add GET /dashboard/promise-tracking endpoint (corporate only)
+- [x] Add GET /packets/{meeting_id}/condensed endpoint (JSON — only flagged sections + key metrics + attendance)
+- [x] Write 9 service tests (test_resolution_trends.py) — trends + promise summary
+- [x] Write 5 API tests (test_resolution_trends_api.py) — trends + promise tracking endpoints + RBAC
+- [x] Write 4 API tests (test_condensed_packet.py) — condensed response + section filtering + attendance + RBAC
+- [x] 542 non-integration tests passing (18 new, 0 regressions); 608 total with integration
+
+### Session 23 — 2026-03-14 (Phase 4B Task 4)
+- Built get_resolution_trends(): per-meeting resolution/promise/attendance stats sorted ascending for charting
+- Built get_promise_tracking_summary(): aggregate promise tracking with avg_days_late and worst offenders (top 5 by broken count)
+- Resolution trends endpoint: corporate sees all, GM store-scoped (auto-filters to their stores)
+- Promise tracking endpoint: corporate only — Thomas's promise accountability view
+- Condensed packet: JSON-only view of flagged/important items (no raw data), grouped by category
+  - Only includes sections with at least one flag (skip clean categories)
+  - Key metrics per section (inventory counts, receivables, ROs, etc.)
+  - Attendance summary with present/absent names
+- 18 new tests (9 service + 5 API + 4 API), 0 regressions
+
+## Task 5: Update All MD Files + Final Verification (Session 23)
+- [x] Update tasks/lessons.md with Session 23 lessons
+- [x] Update README.md with Phase 4B features, new endpoints, test count
+- [x] Verify tasks/todo.md is current (all Phase 4B tasks complete)
+- [x] Run full test suite — 608 passed (542 unit/API + 66 integration), 2 known scheduler flakes
+- [ ] Git commit all changes
+
+### Session 23 — 2026-03-14 (Phase 4B Task 5)
+- Updated lessons.md with 11 Session 23 lessons (metrics aggregation, priority scoring, execute report, SendGrid attachments, CSV BOM, StreamingResponse, promise tracking, condensed packet, resolution trends, stakeholder feedback)
+- Updated README.md: Phase 4B marked COMPLETE, 14 new API endpoints documented, test count updated, status section updated
+- Updated todo.md: Task 5 added and tracked
 
 # Phase 4C — Scheduling & Calendar (upcoming)
 

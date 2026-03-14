@@ -83,3 +83,13 @@
 - **2026-03-13 (Session 22)**: Pre-meeting reminders query meetings scheduled today/tomorrow and notify managers who have OPEN flags. Use the notification scheduler's existing job infrastructure rather than a separate service.
 - **2026-03-13 (Session 22)**: Email recap service (meeting close recap) should be async and not block the close endpoint response. Fire-and-forget pattern — log failures but don't fail the close operation.
 - **2026-03-13 (Session 22)**: Per-store flag overrides use `dataclasses.replace()` for immutable threshold swaps in the engine. Never mutate the original FlagRule — one store's overrides must not corrupt defaults for subsequent evaluations.
+- **2026-03-14 (Session 23)**: MetricsService uses SQLAlchemy func.count/func.avg for efficient aggregation — don't load all records into Python.
+- **2026-03-14 (Session 23)**: Priority scoring is additive (flags can accumulate points from multiple urgency criteria) — keeps scoring transparent and tunable.
+- **2026-03-14 (Session 23)**: ExecuteReportGenerator reuses MetricsService.get_top_priority_items() to avoid duplicating scoring logic.
+- **2026-03-14 (Session 23)**: SendGrid v3 attachments API requires base64-encoded content with disposition="attachment" and proper MIME type.
+- **2026-03-14 (Session 23)**: CSV exports use UTF-8 BOM (\ufeff) prefix for Excel compatibility — without it, Excel misreads Unicode characters.
+- **2026-03-14 (Session 23)**: StreamingResponse with Content-Disposition header enables direct file download from API endpoints.
+- **2026-03-14 (Session 23)**: Promise tracking calculates "days late" as (today - expected_resolution_date) for broken promises, enabling worst-offender sorting.
+- **2026-03-14 (Session 23)**: Condensed packet endpoint is JSON (not PDF) since the execute report already serves as the condensed PDF output.
+- **2026-03-14 (Session 23)**: Resolution trends sorted ascending by date for frontend chart plotting (oldest → newest left to right).
+- **2026-03-14 (Session 23)**: Per-store overrides (Phase 4A) combined with per-manager accountability metrics (Phase 4B) fully address Joel/Amanda/Thomas's email feedback about benchmarks varying by make, store, and market.

@@ -135,6 +135,78 @@ class EmailService:
             return False
 
     # ------------------------------------------------------------------ #
+    # Core send with attachment
+    # ------------------------------------------------------------------ #
+    async def send_email_with_attachment(
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        attachment_bytes: bytes,
+        attachment_filename: str,
+        attachment_type: str = "application/pdf",
+        text_content: Optional[str] = None,
+    ) -> bool:
+        """Send email with a file attachment via SendGrid v3 API.
+
+        Returns True if sent, False on error. Never raises.
+        """
+        import base64
+
+        if not text_content:
+            text_content = _strip_html(html_content)
+
+        if not self.enabled:
+            logger.info(
+                "Email disabled — would send to=%s subject=%s (with attachment %s, %d bytes)",
+                to_email, subject, attachment_filename, len(attachment_bytes),
+            )
+            return True
+
+        encoded = base64.b64encode(attachment_bytes).decode("ascii")
+        payload = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": self.from_email, "name": self.from_name},
+            "subject": subject,
+            "content": [
+                {"type": "text/plain", "value": text_content},
+                {"type": "text/html", "value": html_content},
+            ],
+            "attachments": [
+                {
+                    "content": encoded,
+                    "filename": attachment_filename,
+                    "type": attachment_type,
+                    "disposition": "attachment",
+                }
+            ],
+            "headers": {
+                "List-Unsubscribe": f"<mailto:unsubscribe@{self.from_email.split('@')[-1]}>"
+            },
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.sendgrid.com/v3/mail/send",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+            if resp.status_code in (200, 201, 202):
+                logger.info("Email with attachment sent to=%s subject=%s", to_email, subject)
+                return True
+            else:
+                logger.error("SendGrid error %s: %s", resp.status_code, resp.text)
+                return False
+        except Exception:
+            logger.exception("Failed to send email with attachment to %s", to_email)
+            return False
+
+    # ------------------------------------------------------------------ #
     # Flag assigned
     # ------------------------------------------------------------------ #
     async def send_flag_assigned(self, user, flag, meeting, store) -> bool:
