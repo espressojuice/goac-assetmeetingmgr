@@ -441,6 +441,13 @@
 - Propagates expected_resolution_date to active FlagAssignment records
 - NotificationScheduler.check_pre_meeting_reminders(): sends reminders for OPEN flags when meeting is today/tomorrow
 - 499 tests passing (12 new: 9 API verification + 3 pre-meeting reminders)
+- **Task 3**: Attendance tracking (R7 from meeting notes)
+- Updated MeetingAttendance model: renamed attended→checked_in, added checked_in_at/checked_in_by_id/updated_at, unique constraint on (meeting_id, user_id)
+- Alembic migration 008: column rename, new columns, FK, unique constraint
+- 4 API endpoints: GET attendance list, POST mark check-in, DELETE unmark, GET summary
+- Corporate/GM/Manager can mark attendance; Viewer blocked (403)
+- Attendance list built from UserStore associations (expected attendees = users assigned to store)
+- 515 tests passing (16 new: 16 attendance API tests)
 
 ## Task 2: Pre-Meeting Question Workflow Enhancements
 - [x] Add VERIFIED and UNRESOLVED values to FlagStatus enum
@@ -454,3 +461,50 @@
 - [x] Write 9 API tests for flag verification (test_flag_verification.py)
 - [x] Write 3 service tests for pre-meeting reminders (test_pre_meeting_reminders.py)
 - [x] All 499 tests passing (12 new, 0 regressions)
+
+## Task 3: Attendance Tracking (R7)
+- [x] Update MeetingAttendance model: checked_in, checked_in_at, checked_in_by_id, updated_at, unique constraint
+- [x] Create Alembic migration 008_meeting_attendance_updates.py
+- [x] Add AttendanceResponse, AttendanceMarkRequest, AttendanceSummaryResponse schemas
+- [x] Create attendance.py API routes (GET list, POST mark, DELETE unmark, GET summary)
+- [x] Register attendance router in main.py
+- [x] Write 16 API tests (test_attendance.py)
+- [x] All 515 tests passing (16 new, 0 regressions)
+
+## Task 4: Meeting Close + Recap Email
+- [x] Add CLOSED value to MeetingStatus enum
+- [x] Add closed_at, closed_by_id, close_notes fields to Meeting model
+- [x] Create Alembic migration 009_meeting_close_fields.py (enum ALTER TYPE + new columns)
+- [x] Add MeetingCloseRequest and MeetingCloseResponse schemas
+- [x] Add POST /meetings/{meeting_id}/close endpoint (corporate/GM only)
+- [x] Close sets status=CLOSED, records closed_at/closed_by, stores close_notes
+- [x] Auto-unresolves OPEN and ESCALATED flags on close (→ UNRESOLVED)
+- [x] Leaves RESPONDED and VERIFIED flags unchanged
+- [x] Returns flags_summary (total, open, responded, verified, unresolved, auto_unresolved)
+- [x] Returns attendance_summary (total_expected, total_present, total_absent)
+- [x] Sends meeting recap email to corporate users (attendance + flags grouped by status)
+- [x] 409 if meeting already closed, 403 if not GM/corporate
+- [x] Write 12 API tests (test_meeting_close.py)
+- [x] Write 4 service tests for recap email (test_meeting_recap.py)
+- [x] 531 tests passing (16 new, 0 regressions)
+
+## Task 5: Update All MD Files + Final Verification
+- [x] Update tasks/todo.md with Phase 4A summary and Phase 4B/4C roadmap
+- [x] Update tasks/lessons.md with Session 22 lessons
+- [x] Update README.md with new features, endpoints, migrations, test count
+- [x] Run full test suite — final verification
+- [x] Git commit all MD files
+
+# Phase 4B — Dashboard & Reporting (upcoming)
+
+- [ ] Corporate dashboard: per-manager resolution rates
+- [ ] Accountability metrics: flags resolved vs unresolved over time
+- [ ] Store comparison views
+- [ ] Export meeting history
+- [ ] Condensed packet / flagged-only view
+
+# Phase 4C — Scheduling & Calendar (upcoming)
+
+- [ ] Meeting scheduling (minimum 2x/month cadence enforcement)
+- [ ] Calendar integration (Google Calendar)
+- [ ] Recurring meeting templates

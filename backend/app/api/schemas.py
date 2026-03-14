@@ -484,3 +484,40 @@ class FlagVerifyResponse(BaseModel):
     verified_at: str
     verification_notes: Optional[str] = None
     expected_resolution_date: Optional[str] = None
+
+
+# --- Meeting Close ---
+
+class MeetingCloseRequest(BaseModel):
+    close_notes: Optional[str] = None
+
+
+class MeetingCloseResponse(BaseModel):
+    meeting_id: str
+    status: str
+    closed_at: str
+    closed_by_name: str
+    close_notes: Optional[str] = None
+    flags_summary: dict  # {total, open, responded, verified, unresolved, auto_unresolved}
+    attendance_summary: dict  # {total_expected, total_present, total_absent}
+
+
+# --- Attendance ---
+
+class AttendanceResponse(BaseModel):
+    user_id: str
+    user_name: str
+    user_role: str
+    checked_in: bool
+    checked_in_at: Optional[str] = None
+    checked_in_by_name: Optional[str] = None
+
+
+class AttendanceMarkRequest(BaseModel):
+    user_ids: List[uuid.UUID]
+
+
+class AttendanceSummaryResponse(BaseModel):
+    total_expected: int
+    total_present: int
+    total_absent: int

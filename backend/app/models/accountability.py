@@ -3,7 +3,7 @@ import enum
 import uuid
 from typing import Optional
 
-from sqlalchemy import String, Text, DateTime, Date, Enum, ForeignKey, Index, func
+from sqlalchemy import String, Text, DateTime, Date, Enum, ForeignKey, Index, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -103,16 +103,20 @@ class MeetingAttendance(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     meeting_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("meetings.id"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    role_in_meeting: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    attended: Mapped[bool] = mapped_column(default=False, nullable=False)
+    checked_in: Mapped[bool] = mapped_column(default=False, nullable=False)
+    checked_in_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    checked_in_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
     # Relationships
     meeting: Mapped["Meeting"] = relationship()
-    user: Mapped["User"] = relationship()
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    checked_in_by: Mapped[Optional["User"]] = relationship(foreign_keys=[checked_in_by_id])
 
     __table_args__ = (
+        UniqueConstraint("meeting_id", "user_id", name="uq_meeting_attendance_meeting_user"),
         Index("ix_meeting_attendance_meeting_id", "meeting_id"),
         Index("ix_meeting_attendance_user_id", "user_id"),
     )

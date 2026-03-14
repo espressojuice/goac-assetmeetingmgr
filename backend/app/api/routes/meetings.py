@@ -1,27 +1,35 @@
 """Meeting routes."""
 
+import datetime
+import logging
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import (
     MeetingDetailResponse,
     MeetingDataResponse,
     MeetingFlagDetailResponse,
+    MeetingCloseRequest,
+    MeetingCloseResponse,
 )
-from app.auth import get_current_user, verify_store_access, get_user_store_ids
+from app.auth import get_current_user, require_corporate_or_gm, verify_store_access, get_user_store_ids
 from app.database import get_db
-from app.models.meeting import Meeting
+from app.models.meeting import Meeting, MeetingStatus
 from app.models.flag import Flag, FlagCategory, FlagSeverity, FlagStatus
 from app.models.inventory import NewVehicleInventory, UsedVehicleInventory, ServiceLoaner, FloorplanReconciliation
 from app.models.parts import PartsInventory, PartsAnalysis
 from app.models.financial import Receivable, FIChargeback, ContractInTransit, Prepaid, PolicyAdjustment
 from app.models.operations import OpenRepairOrder, WarrantyClaim, MissingTitle, SlowToAccounting
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStore
+from app.models.accountability import MeetingAttendance
 from app.services.meeting_service import get_meeting_detail, get_meeting_flags
+from app.services.email_service import EmailService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -249,3 +257,207 @@ async def get_meeting_flags_endpoint(
         severity=severity, category=category, status=status, sort_by=sort_by,
     )
     return flags
+
+
+@router.post("/meetings/{meeting_id}/close", response_model=MeetingCloseResponse)
+async def close_meeting(
+    meeting_id: str,
+    body: MeetingCloseRequest,
+    current_user: User = Depends(require_corporate_or_gm),
+    db: AsyncSession = Depends(get_db),
+) -> MeetingCloseResponse:
+    """Close a meeting: set status to CLOSED, auto-unresolve open flags, build recap."""
+    meeting = await _get_meeting_with_access_check(meeting_id, current_user, db)
+
+    # Cannot close an already-closed meeting
+    if meeting.status == MeetingStatus.CLOSED:
+        raise HTTPException(status_code=409, detail="Meeting is already closed")
+
+    # --- 1. Close the meeting ---
+    now = datetime.datetime.now(datetime.timezone.utc)
+    meeting.status = MeetingStatus.CLOSED
+    meeting.closed_at = now
+    meeting.closed_by_id = current_user.id
+    meeting.close_notes = body.close_notes
+
+    # --- 2. Auto-unresolve OPEN flags ---
+    flag_result = await db.execute(
+        select(Flag).where(Flag.meeting_id == meeting.id)
+    )
+    flags = list(flag_result.scalars().all())
+
+    open_count = 0
+    responded_count = 0
+    verified_count = 0
+    unresolved_count = 0
+    auto_unresolved = 0
+
+    for flag in flags:
+        if flag.status == FlagStatus.OPEN:
+            flag.status = FlagStatus.UNRESOLVED
+            auto_unresolved += 1
+            unresolved_count += 1
+        elif flag.status == FlagStatus.RESPONDED:
+            responded_count += 1
+        elif flag.status == FlagStatus.VERIFIED:
+            verified_count += 1
+        elif flag.status == FlagStatus.UNRESOLVED:
+            unresolved_count += 1
+        elif flag.status == FlagStatus.ESCALATED:
+            # Escalated flags also get auto-unresolved on close
+            flag.status = FlagStatus.UNRESOLVED
+            auto_unresolved += 1
+            unresolved_count += 1
+
+    # --- 3. Attendance summary ---
+    attendance_result = await db.execute(
+        select(MeetingAttendance).where(MeetingAttendance.meeting_id == meeting.id)
+    )
+    attendance_records = list(attendance_result.scalars().all())
+
+    # If no attendance records exist, count users associated with the store
+    if attendance_records:
+        total_expected = len(attendance_records)
+        total_present = sum(1 for a in attendance_records if a.checked_in)
+    else:
+        user_count_result = await db.execute(
+            select(func.count(UserStore.id)).where(UserStore.store_id == meeting.store_id)
+        )
+        total_expected = user_count_result.scalar() or 0
+        total_present = 0
+    total_absent = total_expected - total_present
+
+    await db.commit()
+
+    # --- 4. Send recap email (fire-and-forget) ---
+    try:
+        await _send_meeting_recap(
+            meeting, current_user, flags, attendance_records, total_expected, total_present, db
+        )
+    except Exception:
+        logger.exception("Failed to send meeting recap email for meeting %s", meeting_id)
+
+    return MeetingCloseResponse(
+        meeting_id=str(meeting.id),
+        status="closed",
+        closed_at=now.isoformat(),
+        closed_by_name=current_user.name,
+        close_notes=body.close_notes,
+        flags_summary={
+            "total": len(flags),
+            "open": open_count,
+            "responded": responded_count,
+            "verified": verified_count,
+            "unresolved": unresolved_count,
+            "auto_unresolved": auto_unresolved,
+        },
+        attendance_summary={
+            "total_expected": total_expected,
+            "total_present": total_present,
+            "total_absent": total_absent,
+        },
+    )
+
+
+async def _send_meeting_recap(
+    meeting: Meeting,
+    closed_by: User,
+    flags: list[Flag],
+    attendance_records: list[MeetingAttendance],
+    total_expected: int,
+    total_present: int,
+    db: AsyncSession,
+) -> None:
+    """Build and send the meeting recap email to corporate users."""
+    from app.services.email_service import _wrap_html, _severity_badge
+
+    # Fetch store
+    from app.models.store import Store
+    store_result = await db.execute(select(Store).where(Store.id == meeting.store_id))
+    store = store_result.scalar_one()
+
+    # Fetch corporate users
+    corporate_result = await db.execute(
+        select(User).where(User.role == UserRole.CORPORATE, User.is_active == True)
+    )
+    corporate_users = list(corporate_result.scalars().all())
+    if not corporate_users:
+        logger.info("No corporate users to send recap email to")
+        return
+
+    # Build attendance section
+    attendance_html = ""
+    if attendance_records:
+        # Load user names for attendance
+        user_ids = [a.user_id for a in attendance_records]
+        users_result = await db.execute(select(User).where(User.id.in_(user_ids)))
+        users_by_id = {u.id: u for u in users_result.scalars().all()}
+
+        attendance_rows = ""
+        for a in attendance_records:
+            user = users_by_id.get(a.user_id)
+            name = user.name if user else "Unknown"
+            status_icon = "&#9989;" if a.checked_in else "&#10060;"  # check / cross
+            attendance_rows += f'<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;">{name}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center;">{status_icon}</td></tr>'
+
+        attendance_html = f"""
+<h3>Attendance ({total_present}/{total_expected})</h3>
+<table style="width:100%;border-collapse:collapse;margin:15px 0;">
+<tr style="background:#003366;color:#fff;"><th style="padding:8px;text-align:left;">Name</th><th style="padding:8px;text-align:center;">Present</th></tr>
+{attendance_rows}
+</table>"""
+    else:
+        attendance_html = f"<h3>Attendance</h3><p>No attendance records ({total_expected} users expected)</p>"
+
+    # Build flags section grouped by status
+    verified_flags = [f for f in flags if f.status == FlagStatus.VERIFIED]
+    responded_flags = [f for f in flags if f.status == FlagStatus.RESPONDED]
+    unresolved_flags = [f for f in flags if f.status == FlagStatus.UNRESOLVED]
+
+    def _flag_rows(flag_list: list[Flag]) -> str:
+        if not flag_list:
+            return "<p><em>None</em></p>"
+        rows = ""
+        for f in flag_list:
+            rows += (
+                f'<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;">{_severity_badge(f.severity.value)}</td>'
+                f'<td style="padding:6px 10px;border-bottom:1px solid #eee;">{f.category.value.upper()}</td>'
+                f'<td style="padding:6px 10px;border-bottom:1px solid #eee;">{f.message[:80]}</td></tr>'
+            )
+        return f"""<table style="width:100%;border-collapse:collapse;margin:10px 0;">
+<tr style="background:#f0f0f0;"><th style="padding:6px 10px;text-align:left;">Severity</th><th style="padding:6px 10px;text-align:left;">Category</th><th style="padding:6px 10px;text-align:left;">Issue</th></tr>
+{rows}</table>"""
+
+    flags_html = f"""
+<h3>Flags Summary ({len(flags)} total)</h3>
+<p><strong>Verified:</strong> {len(verified_flags)} &bull; <strong>Responded:</strong> {len(responded_flags)} &bull; <strong>Unresolved:</strong> {len(unresolved_flags)}</p>
+"""
+    if unresolved_flags:
+        flags_html += f"<h4 style='color:#dc2626;'>Unresolved ({len(unresolved_flags)})</h4>{_flag_rows(unresolved_flags)}"
+    if responded_flags:
+        flags_html += f"<h4>Responded ({len(responded_flags)})</h4>{_flag_rows(responded_flags)}"
+    if verified_flags:
+        flags_html += f"<h4 style='color:#16a34a;'>Verified ({len(verified_flags)})</h4>{_flag_rows(verified_flags)}"
+
+    close_notes_html = ""
+    if meeting.close_notes:
+        close_notes_html = f'<h3>Close Notes</h3><p style="background:#f8f8f8;padding:12px;border-left:3px solid #003366;">{meeting.close_notes}</p>'
+
+    subject = f"Meeting Closed — {store.name} {meeting.meeting_date}"
+    body = f"""
+<h2>Meeting Recap: {store.name}</h2>
+<table class="detail-table">
+<tr><td>Store</td><td>{store.name}</td></tr>
+<tr><td>Meeting Date</td><td>{meeting.meeting_date}</td></tr>
+<tr><td>Closed By</td><td>{closed_by.name}</td></tr>
+<tr><td>Closed At</td><td>{meeting.closed_at.strftime('%Y-%m-%d %I:%M %p')} CT</td></tr>
+</table>
+{close_notes_html}
+{attendance_html}
+{flags_html}
+"""
+    html = _wrap_html(body)
+
+    email_service = EmailService()
+    for user in corporate_users:
+        await email_service.send_email(user.email, subject, html)

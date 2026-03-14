@@ -14,6 +14,7 @@ class MeetingStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     ERROR = "error"
+    CLOSED = "closed"
 
 
 class Meeting(Base):
@@ -27,12 +28,16 @@ class Meeting(Base):
     flagged_items_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus), default=MeetingStatus.PENDING, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    closed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    close_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
     store: Mapped["Store"] = relationship(back_populates="meetings")
+    closed_by: Mapped[Optional["User"]] = relationship(foreign_keys=[closed_by_id])
     new_vehicle_inventory: Mapped[List["NewVehicleInventory"]] = relationship(back_populates="meeting")
     used_vehicle_inventory: Mapped[List["UsedVehicleInventory"]] = relationship(back_populates="meeting")
     service_loaners: Mapped[List["ServiceLoaner"]] = relationship(back_populates="meeting")

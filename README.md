@@ -10,8 +10,17 @@ Parse R&R DMS exports (PDF schedules, GL reports) into structured data. Apply co
 ### Phase 2: Accountability Web App *(COMPLETE)*
 Web interface for meeting scheduling, packet review, flag responses, and escalation tracking. Google OAuth authentication with role-based access (corporate/gm/manager). Next.js frontend with corporate dashboard, store detail, and meeting detail pages. Email notifications via SendGrid. Full RBAC on all API routes.
 
-### Phase 3: Infrastructure & Automation *(IN PROGRESS)*
-S3 packet storage (Hetzner Object Storage), packet completeness validation (16-document checklist), Reynolds site ID integration, automated DMS export ingestion, trend analysis, cross-store benchmarking.
+### Phase 3: Infrastructure & Automation *(COMPLETE)*
+S3 packet storage (Hetzner Object Storage), packet completeness validation (16-document checklist), Reynolds site ID integration, async validate-then-approve upload flow, page classifier with OCR reference signatures.
+
+### Phase 4A: Core Meeting Workflow *(COMPLETE)*
+Per-store configurable flagging thresholds, pre-meeting question workflow with flag verification (VERIFIED/UNRESOLVED statuses), attendance tracking (check-in/check-out), post-meeting close-out with email recap to corporate.
+
+### Phase 4B: Dashboard & Reporting *(PLANNED)*
+Per-manager resolution rates, accountability metrics, store comparison views, export meeting history.
+
+### Phase 4C: Scheduling & Calendar *(PLANNED)*
+Meeting scheduling with 2x/month cadence enforcement, Google Calendar integration, recurring meeting templates.
 
 ## Tech Stack
 
@@ -24,7 +33,7 @@ S3 packet storage (Hetzner Object Storage), packet completeness validation (16-d
 
 ## Data Models
 
-21 models across 9 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
+22 models across 10 model files. All models use UUID primary keys, timezone-aware timestamps, and indexes on `store_id`/`meeting_id`.
 
 ### Core
 | Model | Table | Description |
@@ -80,16 +89,21 @@ S3 packet storage (Hetzner Object Storage), packet completeness validation (16-d
 | FlagAssignment | `flag_assignments` | Assign flags to users with deadlines |
 | FlagResponseRecord | `flag_responses` | Individual responses to assigned flags |
 | Notification | `notifications` | In-app and email notifications |
-| MeetingAttendance | `meeting_attendance` | Track who attended each meeting |
+| MeetingAttendance | `meeting_attendance` | Track who attended each meeting (check-in/check-out with timestamps) |
+
+### Store Configuration (`store_flag_override.py`)
+| Model | Table | Description |
+|-------|-------|-------------|
+| StoreFlagOverride | `store_flag_overrides` | Per-store flagging threshold overrides |
 
 ### Enums
-- `MeetingStatus`: pending, processing, completed, error
+- `MeetingStatus`: pending, processing, completed, error, in_progress, closed, cancelled
 - `ReconciliationType`: new_237, used_240
 - `PartsCategory`: parts_242, tires_243, gas_oil_grease_244
 - `ReceivableType`: parts_service_200, wholesale_220, factory_2612
 - `FlagCategory`: inventory, parts, financial, operations
 - `FlagSeverity`: yellow, red
-- `FlagStatus`: open, responded, escalated
+- `FlagStatus`: open, responded, escalated, verified, unresolved
 - `UserRole`: corporate, gm, manager, viewer
 - `AssignmentStatus`: pending, acknowledged, responded, overdue, escalated
 - `NotificationType`: flag_assigned, deadline_reminder, overdue_notice, escalation, response_received
@@ -262,6 +276,27 @@ All routes require JWT authentication unless noted. Access is scoped by role: **
 | GET | `/api/v1/meetings/{meeting_id}` | Get meeting details |
 | GET | `/api/v1/meetings/{meeting_id}/data/{category}` | Get parsed data by category |
 | GET | `/api/v1/meetings/{meeting_id}/flags` | Get flags with filters and sorting |
+| POST | `/api/v1/meetings/{meeting_id}/close` | Close meeting — auto-unresolves OPEN flags, sends recap email (corporate/GM) |
+
+### Attendance (Authenticated, store-scoped)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/meetings/{meeting_id}/attendance` | List attendance (expected attendees from UserStore) |
+| POST | `/api/v1/meetings/{meeting_id}/attendance` | Mark user as checked in |
+| DELETE | `/api/v1/meetings/{meeting_id}/attendance/{user_id}` | Unmark user attendance |
+| GET | `/api/v1/meetings/{meeting_id}/attendance/summary` | Attendance summary (present/absent counts) |
+
+### Flag Rules (Corporate + GM)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/stores/{store_id}/flag-rules` | Get all 15 rules with effective thresholds (defaults + overrides) |
+| PUT | `/api/v1/stores/{store_id}/flag-rules/{rule_name}` | Set per-store threshold override |
+| DELETE | `/api/v1/stores/{store_id}/flag-rules/{rule_name}` | Revert rule to defaults |
+
+### Flag Verification (Corporate + GM)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/flags/{flag_id}/verify` | Verify a responded flag (VERIFIED or UNRESOLVED) |
 
 ### Dashboard (Authenticated, store-scoped)
 | Method | Path | Description |
@@ -422,9 +457,9 @@ cd backend && python3 -m pytest tests/ -v
 
 ## Current Status
 
-**Phase 1 COMPLETE.** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI. 308 tests passing (242 unit + 66 integration).
+**Phase 1 COMPLETE.** Full data pipeline with REST API and upload UI. 16 models, 4 parsers (with OCR support), 15 flagging rules, 2 PDF generators, 18 API endpoints, upload web UI.
 
-**Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth. 455 tests passing.
+**Phase 2 COMPLETE.** Auth system (Google OAuth + JWT), role-based access control (corporate/gm/manager) on all routes, 6 accountability models (incl. UserStore), corporate dashboard, store/meeting detail pages, flag response workflow, email notifications (SendGrid), automated reminders/escalation, in-app notification center. 25 API endpoints, Next.js frontend with NextAuth.
 
 **Production LIVE at https://assetmeeting.goac.io.** Deployed on Hetzner VPS (5.161.71.87) alongside greggorr.com, ctrl.goac.io, and ocrmypdf.goac.io — all sharing Traefik v2.11 for routing and auto-HTTPS. Docker Compose with 4 containers (PostgreSQL, FastAPI, Next.js, backup). Google OAuth configured (Google Workspace, Internal). SendGrid domain-authenticated for goac.io. GitHub Actions CI/CD pipeline ready (secrets need configuring). Automated daily backups with 7-day retention.
 
@@ -433,6 +468,13 @@ cd backend && python3 -m pytest tests/ -v
 **Phase 3 in progress.** S3 storage service (Hetzner Object Storage via boto3), packet completeness validator (16-document checklist with OCR-tolerant detection), Reynolds site ID column on stores table (Alembic migration 004). Async validate-then-approve upload flow: upload saves file and returns immediately, validation runs in background with real-time progress polling (page-by-page classification streaming via GET /upload/{meeting_id}/progress). Frontend shows animated progress bar + streaming results. Separate approve endpoint triggers full processing. Full packet scan results in `data/packet_scan_results.md`. Alembic migration 005 adds `previous_flag_id` and `escalation_level` to flags table for recurring flag tracking.
 
 **Classifier rebuilt with reference signatures (Session 21).** PageClassifier rewritten using OCR reference corpus from the Ashdown labeled PDF (27 pages of actual tesseract output). Classification uses schedule-number-first matching for Schedule Summaries, account-number-first for GL 0504, with OCR artifact tolerance for garbled prefixes ("5chedule#:", "ACCCUNT", "Dpen ROs", "MISSING TtTLE"). Supports GL 0504 subtyping (15A/15B for New/Used policy adj, 850/850A/851/851A for F&I chargebacks), continuation page detection (inherits previous page's doc_id), and intro page skipping. 27/27 reference pages classify correctly. Reference signatures documented in `data/reference_signatures.md`.
+
+**Phase 4A complete (Session 22).** Core meeting workflow built across 4 tasks:
+- **Per-store flagging thresholds** — StoreFlagOverride model + 3 API endpoints. Engine uses `dataclasses.replace()` for immutable threshold swaps; disabled rules skipped entirely. Alembic migration 006.
+- **Pre-meeting question workflow** — Flag verification (VERIFIED/UNRESOLVED statuses), expected resolution dates, pre-meeting reminder notifications. GM/controller must explicitly verify responded flags during the meeting. Migration 007.
+- **Attendance tracking** — MeetingAttendance with check-in timestamps, 4 API endpoints (list, mark, unmark, summary). Expected attendees built from UserStore associations. Migration 008.
+- **Post-meeting close-out** — Meeting CLOSED status with close notes, auto-unresolves OPEN/ESCALATED flags, email recap to corporate (attendance + flags grouped by status). Migration 009.
+- 531 tests passing (70 new across Phase 4A, 0 regressions).
 
 ## Reynolds Store Number Map
 
